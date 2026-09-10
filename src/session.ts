@@ -1,38 +1,75 @@
 import { create } from "zustand";
 
-// Lightweight always-loaded session state. The heavy networking (Yjs +
-// Trystero/WebRTC) lives in ./net and is loaded on demand the first time a
-// session starts, so it stays out of the initial bundle.
+// GM-run session state. One participant is the GM (session host); everyone else
+// is a player assigned to a team, or an unassigned observer. Players only see
+// their own divisions plus enemies within vision range, and they *propose*
+// moves rather than making them — the GM adjudicates and releases each turn.
+// The heavy networking lives in ./net, loaded on demand.
 
-export interface Peer {
-  id: string;
+export type Phase = "planning" | "adjudicating";
+export type Role = "gm" | "player" | "observer";
+
+export interface PlayerInfo {
+  cid: string;
   name: string;
-  color: string;
+  teamId: string | null;
+  submitted: boolean;
+  online: boolean;
 }
 
-type Status = "off" | "connecting" | "connected";
+export interface Submission {
+  cid: string;
+  name: string;
+  teamId: string | null;
+  moves: Record<string, { lng: number; lat: number }>;
+  submitted: boolean;
+}
 
 interface SessionStore {
-  status: Status;
+  status: "off" | "connecting" | "connected";
   sessionId: string | null;
-  isHost: boolean;
-  selfName: string;
-  peers: Peer[];
   error: string | null;
+
+  role: Role;
+  selfCid: string;
+  selfName: string;
+  gmName: string;
+
+  players: PlayerInfo[];
+  turn: number;
+  phase: Phase;
+  visionKm: number;
+
+  myTeamId: string | null;
+  /** player: my proposed positions this turn, keyed by division id */
+  proposals: Record<string, { lng: number; lat: number }>;
+  /** gm: proposals received from players, keyed by their cid */
+  submissions: Record<string, Submission>;
+
   start: (sessionId?: string) => void;
   leave: () => void;
-  setSelfName: (name: string) => void;
+  setSelfName: (n: string) => void;
+
+  // gm
+  assign: (cid: string, teamId: string | null) => void;
+  setVisionKm: (km: number) => void;
+  startAdjudication: () => void;
+  releaseTurn: () => void;
+  kick: (cid: string) => void;
+
+  // player
+  propose: (divId: string, lngLat: [number, number]) => void;
+  clearProposal: (divId: string) => void;
+  submitMoves: () => void;
+  recallMoves: () => void;
 }
 
 const CALLSIGNS = [
   "Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel",
   "India", "Juliet", "Kilo", "Lima", "Mike", "November", "Oscar", "Papa",
 ];
-
-function genName(): string {
-  const c = CALLSIGNS[Math.floor(Math.random() * CALLSIGNS.length)];
-  return `${c}-${1 + Math.floor(Math.random() * 9)}`;
-}
+const genName = () =>
+  `${CALLSIGNS[Math.floor(Math.random() * CALLSIGNS.length)]}-${1 + Math.floor(Math.random() * 9)}`;
 
 function loadName(): string {
   try {
@@ -45,13 +82,29 @@ function loadName(): string {
 type NetModule = typeof import("./net");
 let net: NetModule | null = null;
 
+const clearHash = () => {
+  try {
+    history.replaceState(null, "", location.pathname + location.search);
+  } catch {
+    /* ignore */
+  }
+};
+
 export const useSession = create<SessionStore>((set, get) => ({
   status: "off",
   sessionId: null,
-  isHost: false,
-  selfName: loadName(),
-  peers: [],
   error: null,
+  role: "observer",
+  selfCid: "",
+  selfName: loadName(),
+  gmName: "",
+  players: [],
+  turn: 1,
+  phase: "planning",
+  visionKm: 7.5,
+  myTeamId: null,
+  proposals: {},
+  submissions: {},
 
   start: (sessionId) => {
     if (get().status !== "off") return;
@@ -63,33 +116,36 @@ export const useSession = create<SessionStore>((set, get) => ({
       return;
     }
     const isHost = sessionId == null;
-    set({ status: "connecting", sessionId: id, isHost, error: null, peers: [] });
+    const cid =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : Math.random().toString(36).slice(2);
+    set({
+      status: "connecting",
+      sessionId: id,
+      error: null,
+      selfCid: cid,
+      role: isHost ? "gm" : "observer",
+      players: [],
+      turn: 1,
+      phase: "planning",
+      myTeamId: null,
+      proposals: {},
+      submissions: {},
+    });
     try {
       history.replaceState(null, "", `#s=${id}`);
     } catch {
       /* ignore */
     }
-
     import("./net")
       .then((m) => {
         net = m;
-        m.connect(id, isHost, get().selfName, {
-          onStatus: (s) => set({ status: s }),
-          onPeers: (peers) => set({ peers }),
-          onError: (msg) => {
-            net = null;
-            clearHash();
-            set({ status: "off", sessionId: null, peers: [], error: msg });
-          },
-        });
+        m.connect({ sessionId: id, isHost, cid, name: get().selfName });
       })
       .catch(() => {
         clearHash();
-        set({
-          status: "off",
-          sessionId: null,
-          error: "Could not load the session module.",
-        });
+        set({ status: "off", sessionId: null, error: "Could not load the session module." });
       });
   },
 
@@ -97,7 +153,17 @@ export const useSession = create<SessionStore>((set, get) => ({
     net?.disconnect();
     net = null;
     clearHash();
-    set({ status: "off", sessionId: null, isHost: false, peers: [], error: null });
+    set({
+      status: "off",
+      sessionId: null,
+      error: null,
+      role: "observer",
+      players: [],
+      gmName: "",
+      myTeamId: null,
+      proposals: {},
+      submissions: {},
+    });
   },
 
   setSelfName: (name) => {
@@ -110,12 +176,29 @@ export const useSession = create<SessionStore>((set, get) => ({
     }
     net?.setName(clean);
   },
+
+  assign: (cid, teamId) => net?.gmAssign(cid, teamId),
+  setVisionKm: (km) => {
+    set({ visionKm: km });
+    net?.gmSetVision(km);
+  },
+  startAdjudication: () => net?.gmStartAdjudication(),
+  releaseTurn: () => net?.gmReleaseTurn(),
+  kick: (cid) => net?.gmKick(cid),
+
+  propose: (divId, [lng, lat]) => {
+    set((s) => ({ proposals: { ...s.proposals, [divId]: { lng, lat } } }));
+    net?.playerSyncProposals();
+  },
+  clearProposal: (divId) => {
+    set((s) => {
+      const next = { ...s.proposals };
+      delete next[divId];
+      return { proposals: next };
+    });
+    net?.playerSyncProposals();
+  },
+  submitMoves: () => net?.playerSubmit(),
+  recallMoves: () => net?.playerRecall(),
 }));
 
-function clearHash() {
-  try {
-    history.replaceState(null, "", location.pathname + location.search);
-  } catch {
-    /* ignore */
-  }
-}

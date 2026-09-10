@@ -396,7 +396,15 @@ export const useGameStore = create<State>((set, get) => ({
 }));
 
 // Autosave the scenario JSON (not tiles — those live in IndexedDB / the bundle).
+// Paused while a player is in a session, so their local scenario isn't
+// overwritten by the fog-of-war view they receive from the GM.
+let autosavePaused = false;
+export function setAutosavePaused(v: boolean): void {
+  autosavePaused = v;
+}
+
 useGameStore.subscribe((s) => {
+  if (autosavePaused) return;
   try {
     localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(s.game));
   } catch {
@@ -409,3 +417,4 @@ function ordinal(n: number): string {
   const v = n % 100;
   return n + (s[(v - 20) % 10] ?? s[v] ?? s[0]);
 }
+

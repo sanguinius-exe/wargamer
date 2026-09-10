@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useGameStore } from "../store";
 import {
   Division,
@@ -13,11 +13,54 @@ import {
 } from "../types";
 import { renderSymbol } from "../symbols";
 import { countTilesForBounds } from "../tiles/tileMath";
-import SessionPanel from "./SessionPanel";
+import { useSession } from "../session";
+import SessionTab from "./SessionTab";
 
 const IDENTITIES: Identity[] = ["friend", "hostile", "neutral", "unknown", "pending"];
 
 export default function Sidebar() {
+  const status = useSession((s) => s.status);
+  const role = useSession((s) => s.role);
+  const restricted = status === "connected" && role !== "gm";
+
+  const [tab, setTab] = useState<"scenario" | "session">("scenario");
+  // Show the Session tab once when a session starts.
+  const wasOff = useRef(true);
+  useEffect(() => {
+    if (status !== "off" && wasOff.current) setTab("session");
+    wasOff.current = status === "off";
+  }, [status]);
+
+  return (
+    <aside className="wg-sidebar">
+      <div className="wg-tabbar">
+        <button
+          className={tab === "scenario" ? "active" : ""}
+          onClick={() => setTab("scenario")}
+        >
+          {restricted ? "Map" : "Scenario"}
+        </button>
+        <button
+          className={tab === "session" ? "active" : ""}
+          onClick={() => setTab("session")}
+        >
+          Session
+          {status === "connected" && <span className="wg-tabdot" />}
+        </button>
+      </div>
+
+      {tab === "session" ? (
+        <section className="wg-panel">
+          <SessionTab />
+        </section>
+      ) : (
+        <ScenarioTab restricted={restricted} />
+      )}
+    </aside>
+  );
+}
+
+function ScenarioTab({ restricted }: { restricted: boolean }) {
   const teams = useGameStore((s) => s.game.teams);
   const divisions = useGameStore((s) => s.game.divisions);
   const theatre = useGameStore((s) => s.game.theatre);
@@ -47,7 +90,6 @@ export default function Sidebar() {
   const [maxZoom, setMaxZoom] = useState(14);
   const [bakeImagery, setBakeImagery] = useState(true);
   const [bakeReference, setBakeReference] = useState(true);
-  // Always include a shallow overview so the whole AO is visible when zoomed out.
   const minZoom = Math.min(6, maxZoom);
 
   const estimate = useMemo(() => {
@@ -60,120 +102,122 @@ export default function Sidebar() {
   }, [theatre, minZoom, maxZoom, bakeImagery, bakeReference]);
 
   return (
-    <aside className="wg-sidebar">
-      <SessionPanel />
-
-      <section className="wg-panel">
-        <h2>Theatre of operations</h2>
-        {theatre ? (
-          <p className="wg-muted wg-bounds">{fmtBounds(theatre.bounds)}</p>
-        ) : (
-          <p className="wg-muted">No theatre set — draw one to enable imagery download.</p>
-        )}
-        <div className="wg-row">
-          <button className={selectingTheatre ? "active" : ""} onClick={startTheatreSelect}>
-            {theatre ? "Redraw" : "Draw theatre"}
-          </button>
-          {theatre && <button onClick={clearTheatre}>Clear</button>}
-        </div>
-      </section>
-
-      <section className="wg-panel">
-        <h2>Basemap imagery</h2>
-        {basemap ? (
-          <p className="wg-muted">
-            Baked{" "}
-            {basemap.imagery ? `${basemap.imagery.tileCount} imagery` : ""}
-            {basemap.imagery && basemap.reference ? " + " : ""}
-            {basemap.reference ? `${basemap.reference.tileCount} reference` : ""} tiles
-            · z{basemap.imagery?.minzoom ?? basemap.reference?.minzoom}–
-            {basemap.imagery?.maxzoom ?? basemap.reference?.maxzoom}. Travels inside the
-            .wargame file.
-          </p>
-        ) : (
-          <p className="wg-muted">
-            Streaming Esri tiles live. Download an area to make the scenario work
-            offline and self-contained.
-          </p>
-        )}
-
-        {bake?.running ? (
-          <div className="wg-bake">
-            <div className="wg-progress">
-              <i
-                style={{
-                  width: bake.total ? `${(bake.done / bake.total) * 100}%` : "8%",
-                }}
-              />
+    <>
+      {!restricted && (
+        <>
+          <section className="wg-panel">
+            <h2>Theatre of operations</h2>
+            {theatre ? (
+              <p className="wg-muted wg-bounds">{fmtBounds(theatre.bounds)}</p>
+            ) : (
+              <p className="wg-muted">No theatre set — draw one to enable imagery download.</p>
+            )}
+            <div className="wg-row">
+              <button className={selectingTheatre ? "active" : ""} onClick={startTheatreSelect}>
+                {theatre ? "Redraw" : "Draw theatre"}
+              </button>
+              {theatre && <button onClick={clearTheatre}>Clear</button>}
             </div>
-            <div className="wg-row wg-baketween">
-              <span className="wg-muted">{bake.label}</span>
-              <button onClick={cancelBake}>Cancel</button>
-            </div>
-          </div>
-        ) : (
-          <div className="wg-bakeform">
-            <label className="wg-check">
-              <input
-                type="checkbox"
-                checked={bakeImagery}
-                onChange={(e) => setBakeImagery(e.target.checked)}
-              />
-              Satellite imagery
-            </label>
-            <label className="wg-check">
-              <input
-                type="checkbox"
-                checked={bakeReference}
-                onChange={(e) => setBakeReference(e.target.checked)}
-              />
-              Roads &amp; labels
-            </label>
-            <label className="wg-slider">
-              <span>
-                Detail: zoom {minZoom}–{maxZoom}
-              </span>
-              <input
-                type="range"
-                min={10}
-                max={17}
-                value={maxZoom}
-                onChange={(e) => setMaxZoom(Number(e.target.value))}
-              />
-            </label>
-            {estimate && (
+          </section>
+
+          <section className="wg-panel">
+            <h2>Basemap imagery</h2>
+            {basemap ? (
               <p className="wg-muted">
-                ≈ {estimate.tiles.toLocaleString()} tiles ·{" "}
-                {estimate.mb < 1
-                  ? `${Math.round(estimate.mb * 1024)} KB`
-                  : `${estimate.mb.toFixed(estimate.mb < 20 ? 1 : 0)} MB`}
+                Baked{" "}
+                {basemap.imagery ? `${basemap.imagery.tileCount} imagery` : ""}
+                {basemap.imagery && basemap.reference ? " + " : ""}
+                {basemap.reference ? `${basemap.reference.tileCount} reference` : ""} tiles
+                · z{basemap.imagery?.minzoom ?? basemap.reference?.minzoom}–
+                {basemap.imagery?.maxzoom ?? basemap.reference?.maxzoom}. Travels inside
+                the .wargame file.
+              </p>
+            ) : (
+              <p className="wg-muted">
+                Streaming Esri tiles live. Download an area to make the scenario
+                work offline and self-contained.
               </p>
             )}
-            <button
-              className="primary"
-              disabled={!theatre || (!bakeImagery && !bakeReference)}
-              onClick={() =>
-                theatre &&
-                void runBake({
-                  bounds: theatre.bounds,
-                  minZoom,
-                  maxZoom,
-                  layers: { imagery: bakeImagery, reference: bakeReference },
-                })
-              }
-            >
-              {theatre ? "Download imagery for theatre" : "Set a theatre first"}
-            </button>
-            {basemap && (
-              <button onClick={() => void clearBasemap()}>Clear baked imagery</button>
+
+            {bake?.running ? (
+              <div className="wg-bake">
+                <div className="wg-progress">
+                  <i
+                    style={{
+                      width: bake.total ? `${(bake.done / bake.total) * 100}%` : "8%",
+                    }}
+                  />
+                </div>
+                <div className="wg-row wg-baketween">
+                  <span className="wg-muted">{bake.label}</span>
+                  <button onClick={cancelBake}>Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <div className="wg-bakeform">
+                <label className="wg-check">
+                  <input
+                    type="checkbox"
+                    checked={bakeImagery}
+                    onChange={(e) => setBakeImagery(e.target.checked)}
+                  />
+                  Satellite imagery
+                </label>
+                <label className="wg-check">
+                  <input
+                    type="checkbox"
+                    checked={bakeReference}
+                    onChange={(e) => setBakeReference(e.target.checked)}
+                  />
+                  Roads &amp; labels
+                </label>
+                <label className="wg-slider">
+                  <span>
+                    Detail: zoom {minZoom}–{maxZoom}
+                  </span>
+                  <input
+                    type="range"
+                    min={10}
+                    max={17}
+                    value={maxZoom}
+                    onChange={(e) => setMaxZoom(Number(e.target.value))}
+                  />
+                </label>
+                {estimate && (
+                  <p className="wg-muted">
+                    ≈ {estimate.tiles.toLocaleString()} tiles ·{" "}
+                    {estimate.mb < 1
+                      ? `${Math.round(estimate.mb * 1024)} KB`
+                      : `${estimate.mb.toFixed(estimate.mb < 20 ? 1 : 0)} MB`}
+                  </p>
+                )}
+                <button
+                  className="primary"
+                  disabled={!theatre || (!bakeImagery && !bakeReference)}
+                  onClick={() =>
+                    theatre &&
+                    void runBake({
+                      bounds: theatre.bounds,
+                      minZoom,
+                      maxZoom,
+                      layers: { imagery: bakeImagery, reference: bakeReference },
+                    })
+                  }
+                >
+                  {theatre ? "Download imagery for theatre" : "Set a theatre first"}
+                </button>
+                {basemap && (
+                  <button onClick={() => void clearBasemap()}>Clear baked imagery</button>
+                )}
+              </div>
             )}
-          </div>
-        )}
-        <p className="wg-tip">
-          Imagery © Esri and its data providers. Downloaded for offline use under
-          Esri's attribution terms.
-        </p>
-      </section>
+            <p className="wg-tip">
+              Imagery © Esri and its data providers. Downloaded for offline use
+              under Esri's attribution terms.
+            </p>
+          </section>
+        </>
+      )}
 
       <section className="wg-panel">
         <h2>Map layers</h2>
@@ -196,7 +240,10 @@ export default function Sidebar() {
       </section>
 
       <section className="wg-panel">
-        <h2>Order of battle</h2>
+        <h2>{restricted ? "Your order of battle" : "Order of battle"}</h2>
+        {teams.length === 0 && (
+          <p className="wg-muted">Waiting for the GM to release the first turn…</p>
+        )}
         {teams.map((team) => {
           const roster = divisions.filter((d) => d.teamId === team.id);
           const deployed = roster.filter((d) => d.position).length;
@@ -207,12 +254,18 @@ export default function Sidebar() {
                 className="wg-team-head"
                 style={{ borderLeftColor: IDENTITY_COLOR[team.identity] }}
               >
-                <input
-                  className="wg-team-name"
-                  value={team.name}
-                  onChange={(e) => updateTeam(team.id, { name: e.target.value })}
-                  spellCheck={false}
-                />
+                {restricted ? (
+                  <span className="wg-team-name" style={{ padding: "3px 4px" }}>
+                    {team.name}
+                  </span>
+                ) : (
+                  <input
+                    className="wg-team-name"
+                    value={team.name}
+                    onChange={(e) => updateTeam(team.id, { name: e.target.value })}
+                    spellCheck={false}
+                  />
+                )}
                 <span className="wg-count">
                   {deployed}/{roster.length}
                 </span>
@@ -223,22 +276,32 @@ export default function Sidebar() {
                 >
                   {hidden ? "🙈" : "👁"}
                 </button>
-                <button className="wg-icon" title="Remove team" onClick={() => removeTeam(team.id)}>
-                  ✕
-                </button>
+                {!restricted && (
+                  <button
+                    className="wg-icon"
+                    title="Remove team"
+                    onClick={() => removeTeam(team.id)}
+                  >
+                    ✕
+                  </button>
+                )}
               </div>
 
-              <select
-                className="wg-identity"
-                value={team.identity}
-                onChange={(e) => updateTeam(team.id, { identity: e.target.value as Identity })}
-              >
-                {IDENTITIES.map((i) => (
-                  <option key={i} value={i}>
-                    {IDENTITY_LABEL[i]}
-                  </option>
-                ))}
-              </select>
+              {!restricted && (
+                <select
+                  className="wg-identity"
+                  value={team.identity}
+                  onChange={(e) =>
+                    updateTeam(team.id, { identity: e.target.value as Identity })
+                  }
+                >
+                  {IDENTITIES.map((i) => (
+                    <option key={i} value={i}>
+                      {IDENTITY_LABEL[i]}
+                    </option>
+                  ))}
+                </select>
+              )}
 
               <ul className="wg-roster">
                 {roster.map((d) => (
@@ -247,21 +310,26 @@ export default function Sidebar() {
                     d={d}
                     team={team}
                     selected={selectedId === d.id}
+                    restricted={restricted}
                     onSelect={() => selectDivision(d.id)}
                     onRecall={() => recallDivision(d.id)}
                   />
                 ))}
               </ul>
 
-              <button className="wg-add" onClick={() => addDivision(team.id)}>
-                + Add division
-              </button>
+              {!restricted && (
+                <button className="wg-add" onClick={() => addDivision(team.id)}>
+                  + Add division
+                </button>
+              )}
             </div>
           );
         })}
-        <button className="wg-add wg-add-team" onClick={addTeam}>
-          + Add team
-        </button>
+        {!restricted && (
+          <button className="wg-add wg-add-team" onClick={addTeam}>
+            + Add team
+          </button>
+        )}
       </section>
 
       <section className="wg-panel">
@@ -269,16 +337,18 @@ export default function Sidebar() {
         <textarea
           className="wg-notes"
           value={notes}
+          readOnly={restricted}
           placeholder="Situation, intent, special rules…"
           onChange={(e) => updateMeta({ notes: e.target.value })}
         />
       </section>
 
       <p className="wg-tip">
-        Drag a division onto the map to deploy it. Drag its symbol to reposition.
-        Click any symbol to edit its condition.
+        {restricted
+          ? "Drag your divisions to propose moves, then Submit from the Session tab."
+          : "Drag a division onto the map to deploy it. Drag its symbol to reposition. Click any symbol to edit its condition."}
       </p>
-    </aside>
+    </>
   );
 }
 
@@ -286,12 +356,14 @@ function RosterRow({
   d,
   team,
   selected,
+  restricted,
   onSelect,
   onRecall,
 }: {
   d: Division;
   team: Team;
   selected: boolean;
+  restricted: boolean;
   onSelect: () => void;
   onRecall: () => void;
 }) {
@@ -303,8 +375,9 @@ function RosterRow({
   return (
     <li
       className={`wg-roster-row ${selected ? "selected" : ""} ${d.position ? "" : "reserve"}`}
-      draggable
+      draggable={!restricted}
       onDragStart={(e) => {
+        if (restricted) return;
         e.dataTransfer.setData("text/wg-division", d.id);
         e.dataTransfer.effectAllowed = "move";
       }}
@@ -318,16 +391,18 @@ function RosterRow({
         {eff}
       </span>
       {d.position ? (
-        <button
-          className="wg-icon"
-          title="Recall to reserve (remove from map)"
-          onClick={(e) => {
-            e.stopPropagation();
-            onRecall();
-          }}
-        >
-          ⤺
-        </button>
+        !restricted && (
+          <button
+            className="wg-icon"
+            title="Recall to reserve (remove from map)"
+            onClick={(e) => {
+              e.stopPropagation();
+              onRecall();
+            }}
+          >
+            ⤺
+          </button>
+        )
       ) : (
         <span className="wg-icon wg-reserve-tag" title="In reserve, off-map">
           R

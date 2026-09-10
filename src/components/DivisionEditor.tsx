@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { useGameStore } from "../store";
+import { useSession } from "../session";
 import {
   DIVISION_TYPES,
   ECHELONS,
@@ -38,6 +39,10 @@ export default function DivisionEditor() {
   const recall = useGameStore((s) => s.recallDivision);
   const close = useGameStore((s) => s.selectDivision);
 
+  const readOnly = useSession(
+    (s) => s.status === "connected" && s.role !== "gm",
+  );
+
   const team = teams.find((t) => t.id === d?.teamId);
   const preview = useMemo(
     () => (d && team ? renderSymbol(d, team, { size: 40, detail: "full" }).svg : ""),
@@ -56,12 +61,17 @@ export default function DivisionEditor() {
           value={d.name}
           onChange={(e) => update(id, { name: e.target.value })}
           spellCheck={false}
+          disabled={readOnly}
         />
         <button className="wg-icon" title="Close" onClick={() => close(null)}>
           ✕
         </button>
       </div>
       <div className="wg-sidc">{describeSymbol(d, team)}</div>
+      {readOnly && (
+        <p className="wg-tip">Read-only — the GM controls unit condition.</p>
+      )}
+      <fieldset className="wg-editor-fs" disabled={readOnly}>
 
       <div className="wg-eff-summary">
         <span>Combat effectiveness</span>
@@ -204,17 +214,18 @@ export default function DivisionEditor() {
         />
       </label>
 
-      <div className="wg-editor-actions">
-        {d.position && <button onClick={() => recall(id)}>Recall to reserve</button>}
-        <button
-          className="danger"
-          onClick={() => {
-            if (confirm(`Delete ${d.name}?`)) remove(id);
-          }}
-        >
-          Delete division
-        </button>
-      </div>
+        <div className="wg-editor-actions">
+          {d.position && <button onClick={() => recall(id)}>Recall to reserve</button>}
+          <button
+            className="danger"
+            onClick={() => {
+              if (confirm(`Delete ${d.name}?`)) remove(id);
+            }}
+          >
+            Delete division
+          </button>
+        </div>
+      </fieldset>
     </aside>
   );
 }

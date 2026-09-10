@@ -26,14 +26,18 @@ Everything runs client-side; there is no server.
   with high-contrast name + effectiveness labels.
 - **Share a file** — export / import a `.wargame` bundle (a zip of
   `scenario.json` + baked tiles). Autosaves to the browser between sessions.
-- **Shared sessions** — "Start shared session" opens a room; anyone with the
-  `#s=<code>` link joins and edits the same map live. State is a Yjs CRDT
-  (`src/net.ts`) so concurrent edits merge with no authority. Sync goes through
-  a tiny relay — a ~60-line Cloudflare Worker in [`relay/`](relay/) that just
-  forwards bytes between a room's members (never sees game state). Fits the
-  Cloudflare free plan. Deploy it, then set the `VITE_RELAY_URL` repo variable.
-  Baked imagery does not travel over the channel; a joiner without it falls back
-  to the live stream.
+- **GM-run sessions** — "Start session as GM" opens a room; players join with
+  the `#s=<code>` link. The GM assigns each player to a team from the **Session**
+  sidebar tab. Players see only their own divisions plus enemy divisions within
+  vision range (7.5 km by default, GM-adjustable), and they *propose* moves by
+  dragging — nothing changes until they **Submit** and the GM adjudicates and
+  **Releases** the turn, at which point every team's fog-of-war view updates and
+  the next turn begins. State is authoritative on the GM's client (`src/net.ts`);
+  sync runs through a tiny relay — a ~60-line Cloudflare Worker in
+  [`relay/`](relay/) that just forwards messages between a room's members and
+  never sees game state. Fits the Cloudflare free plan. Deploy it, then set the
+  `VITE_RELAY_URL` repo variable. Baked imagery isn't sent over the channel;
+  players without it fall back to the live Esri stream.
 
 ## Develop
 

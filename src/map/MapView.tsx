@@ -2,10 +2,31 @@ import { useEffect, useRef, useState } from "react";
 import type { DragEvent as ReactDragEvent } from "react";
 import maplibregl, { StyleSpecification } from "maplibre-gl";
 import { useGameStore } from "../store";
-import { Division, Team, GameFile, effectiveness, effColor } from "../types";
+import { useSession } from "../session";
+import {
+  Division,
+  Team,
+  GameFile,
+  effectiveness,
+  effColor,
+  IDENTITY_COLOR,
+} from "../types";
 import { renderSymbol } from "../symbols";
 import { IMAGERY_URL, IMAGERY_ATTRIB, REFERENCE_ATTRIB } from "../tiles/bake";
 import { activeTileCount } from "../tiles/tileStore";
+
+/** How this client may interact with the board. */
+function boardMode() {
+  const s = useSession.getState();
+  if (s.status !== "connected") return { kind: "solo" as const };
+  if (s.role === "gm") return { kind: "gm" as const, phase: s.phase, submissions: s.submissions };
+  return {
+    kind: "player" as const,
+    phase: s.phase,
+    myTeamId: s.myTeamId,
+    proposals: s.proposals,
+  };
+}
 
 const ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services";
 const TRANSPORT_URL = `${ESRI}/World_Transportation/MapServer/tile/{z}/{y}/{x}`;
@@ -212,6 +233,13 @@ export default function MapView() {
   const basemapKey = useGameStore((s) => s.game.basemap?.bakedAt ?? "online");
   const tileEpoch = useGameStore((s) => s.tileEpoch);
 
+  const sessStatus = useSession((s) => s.status);
+  const sessRole = useSession((s) => s.role);
+  const sessPhase = useSession((s) => s.phase);
+  const myTeamId = useSession((s) => s.myTeamId);
+  const proposals = useSession((s) => s.proposals);
+  const submissions = useSession((s) => s.submissions);
+
   // --- init once ----------------------------------------------------------
   useEffect(() => {
     const st = useGameStore.getState();
@@ -340,6 +368,91 @@ export default function MapView() {
         paint: { "line-color": "#f2b134", "line-width": 2, "line-dasharray": [3, 1.5] },
       });
     }
+    if (!map.getSource("wg-plan-lines")) {
+      map.addSource("wg-plan-lines", { type: "geojson", data: EMPTY_FC });
+      map.addLayer({
+        id: "wg-plan-lines",
+        type: "line",
+        source: "wg-plan-lines",
+        paint: {
+          "line-color": ["coalesce", ["get", "color"], "#f2b134"],
+          "line-width": 2,
+          "line-dasharray": [2, 2],
+          "line-opacity": 0.9,
+        },
+      });
+    }
+    if (!map.getSource("wg-plan-targets")) {
+      map.addSource("wg-plan-targets", { type: "geojson", data: EMPTY_FC });
+      map.addLayer({
+        id: "wg-plan-targets",
+        type: "circle",
+        source: "wg-plan-targets",
+        paint: {
+          "circle-radius": 4,
+          "circle-color": ["coalesce", ["get", "color"], "#f2b134"],
+          "circle-stroke-color": "#0b0e14",
+          "circle-stroke-width": 1.5,
+        },
+      });
+    }
+  }
+
+  function syncPlan() {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const game = useGameStore.getState().game;
+    const divById = new Map(game.divisions.map((d) => [d.id, d]));
+    const mode = boardMode();
+    const lines: FC["features"] = [];
+    const targets: FC["features"] = [];
+    const add = (
+      from: { lng: number; lat: number },
+      to: { lng: number; lat: number },
+      color: string,
+    ) => {
+      lines.push({
+        type: "Feature",
+        properties: { color },
+        geometry: {
+          type: "LineString",
+          coordinates: [
+            [from.lng, from.lat],
+            [to.lng, to.lat],
+          ],
+        },
+      });
+      targets.push({
+        type: "Feature",
+        properties: { color },
+        geometry: { type: "Point", coordinates: [to.lng, to.lat] },
+      });
+    };
+    const colorOf = (teamId: string | null | undefined) => {
+      const t = game.teams.find((x) => x.id === teamId);
+      return t ? IDENTITY_COLOR[t.identity] : "#f2b134";
+    };
+    if (mode.kind === "player" && mode.phase === "planning") {
+      for (const [id, to] of Object.entries(mode.proposals)) {
+        const d = divById.get(id);
+        if (d?.position) add(d.position, to, colorOf(d.teamId));
+      }
+    } else if (mode.kind === "gm" && mode.phase === "adjudicating") {
+      for (const sub of Object.values(mode.submissions)) {
+        for (const [id, to] of Object.entries(sub.moves)) {
+          const d = divById.get(id);
+          if (d?.position) add(d.position, to, colorOf(sub.teamId));
+        }
+      }
+    }
+    (map.getSource("wg-plan-lines") as maplibregl.GeoJSONSource | undefined)?.setData({
+      type: "FeatureCollection",
+      features: lines,
+    });
+    (map.getSource("wg-plan-targets") as maplibregl.GeoJSONSource | undefined)?.setData({
+      type: "FeatureCollection",
+      features: targets,
+    });
   }
 
   function syncTheatre() {
@@ -374,6 +487,7 @@ export default function MapView() {
     const curTeams = s.game.teams;
     const curHidden = s.hiddenTeamIds;
     const curSelected = s.selectedDivisionId;
+    const mode = boardMode();
     const teamById = new Map(curTeams.map((t) => [t.id, t]));
     const want = new Set<string>();
 
@@ -384,6 +498,21 @@ export default function MapView() {
       if (!team) continue;
       want.add(d.id);
 
+      const isMine = mode.kind !== "player" || d.teamId === mode.myTeamId;
+      let lng = d.position.lng;
+      let lat = d.position.lat;
+      if (mode.kind === "player" && isMine) {
+        const p = mode.proposals[d.id];
+        if (p) {
+          lng = p.lng;
+          lat = p.lat;
+        }
+      }
+      const draggable =
+        mode.kind === "solo" ||
+        mode.kind === "gm" ||
+        (mode.kind === "player" && isMine && mode.phase === "planning");
+
       let m = markersRef.current.get(d.id);
       if (!m) {
         const el = document.createElement("div");
@@ -392,16 +521,22 @@ export default function MapView() {
           ev.stopPropagation();
           useGameStore.getState().selectDivision(d.id);
         });
-        m = new maplibregl.Marker({ element: el, draggable: true });
+        m = new maplibregl.Marker({ element: el, draggable });
         m.on("dragend", () => {
           const ll = m!.getLngLat();
-          useGameStore.getState().moveDivision(d.id, [ll.lng, ll.lat]);
+          if (boardMode().kind === "player") {
+            useSession.getState().propose(d.id, [ll.lng, ll.lat]);
+          } else {
+            useGameStore.getState().moveDivision(d.id, [ll.lng, ll.lat]);
+          }
         });
         markersRef.current.set(d.id, m);
-        m.setLngLat([d.position.lng, d.position.lat]).addTo(map);
+        m.setLngLat([lng, lat]).addTo(map);
       } else {
-        m.setLngLat([d.position.lng, d.position.lat]);
+        m.setDraggable(draggable);
+        m.setLngLat([lng, lat]);
       }
+      m.getElement().dataset.foe = isMine ? "" : "1";
       paintMarker(m.getElement(), m, d, team, curSelected === d.id);
     }
 
@@ -412,9 +547,22 @@ export default function MapView() {
       }
     }
     applyMarkerScale();
+    syncPlan();
   }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(syncMarkers, [ready, divisions, teams, hiddenTeamIds, selectedId]);
+  useEffect(syncMarkers, [
+    ready,
+    divisions,
+    teams,
+    hiddenTeamIds,
+    selectedId,
+    sessStatus,
+    sessRole,
+    sessPhase,
+    myTeamId,
+    proposals,
+    submissions,
+  ]);
 
   // Resize every symbol to the current zoom (called on map "zoom" + after sync),
   // and slide its text label to just under the (scaled) icon.
@@ -444,6 +592,7 @@ export default function MapView() {
     }
   }
   function onDrop(e: ReactDragEvent) {
+    if (boardMode().kind === "player") return; // players can't deploy
     const id = e.dataTransfer.getData("text/wg-division");
     const map = mapRef.current;
     if (!id || !map || !containerRef.current) return;
