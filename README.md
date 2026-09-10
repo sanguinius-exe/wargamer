@@ -26,6 +26,14 @@ Everything runs client-side; there is no server.
   with high-contrast name + effectiveness labels.
 - **Share a file** — export / import a `.wargame` bundle (a zip of
   `scenario.json` + baked tiles). Autosaves to the browser between sessions.
+- **Shared sessions (experimental)** — "Start shared session" opens a peer-to-peer
+  room; anyone with the `#s=<code>` link joins and edits the same map live.
+  State is a Yjs CRDT synced over WebRTC (`src/net.ts`), so concurrent edits
+  merge and there is no server. Signaling uses public WebTorrent trackers
+  (`TRACKER_URLS` in `src/net.ts`) — swap that list if peers stop finding each
+  other, or point it at your own signaling relay for reliability. Baked imagery
+  does not travel over the channel; a joiner without it falls back to the live
+  stream.
 
 ## Develop
 

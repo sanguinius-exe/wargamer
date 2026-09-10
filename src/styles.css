@@ -296,6 +296,82 @@ textarea {
   font-size: 11px;
   line-height: 1.5;
 }
+.wg-tip code {
+  font-size: 10px;
+}
+
+/* ---------- session panel ---------- */
+
+.wg-session .wg-full {
+  width: 100%;
+  margin-top: 6px;
+}
+.wg-name-input {
+  width: 100%;
+  font-weight: 600;
+}
+.wg-join {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.wg-join input {
+  flex: 1;
+  min-width: 0;
+}
+.wg-session-code {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.wg-session-code code {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--accent);
+}
+.wg-peers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 8px 0;
+}
+.wg-peer {
+  --c: #8892a0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  padding: 2px 7px 2px 6px;
+  border-radius: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--c);
+}
+.wg-peer .wg-muted {
+  font-size: 10px;
+}
+.wg-peer-wait {
+  padding: 2px 0;
+}
+.wg-name-inline {
+  width: 84px;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--text);
+}
+.wg-name-inline:focus {
+  outline: 1px solid var(--line);
+  border-radius: 3px;
+}
+.wg-session-err {
+  color: #f0817a;
+  font-size: 11px;
+  margin: 6px 0 0;
+}
 
 /* ---------- editor ---------- */
 

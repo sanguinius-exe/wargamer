@@ -5,6 +5,7 @@ import { useGameStore } from "../store";
 import { Division, Team, GameFile, effectiveness, effColor } from "../types";
 import { renderSymbol } from "../symbols";
 import { IMAGERY_URL, IMAGERY_ATTRIB, REFERENCE_ATTRIB } from "../tiles/bake";
+import { activeTileCount } from "../tiles/tileStore";
 
 const ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services";
 const TRANSPORT_URL = `${ESRI}/World_Transportation/MapServer/tile/{z}/{y}/{x}`;
@@ -39,13 +40,21 @@ function markerScale(zoom: number, lat: number): number {
   return Math.max(MARKER_MIN_SCALE, Math.min(MARKER_MAX_SCALE, Math.sqrt(raw)));
 }
 
-/** Full MapLibre style: baked tiles when present, else streamed Esri tiles. */
-function buildStyle(game: GameFile, lv: LayerVisible): StyleSpecification {
+/**
+ * Full MapLibre style: baked tiles when we actually hold them, else streamed
+ * Esri tiles. In a shared session a guest can have `basemap` metadata but none
+ * of the GM's tiles — `haveBakedTiles` keeps them on the live stream.
+ */
+function buildStyle(
+  game: GameFile,
+  lv: LayerVisible,
+  haveBakedTiles: boolean,
+): StyleSpecification {
   const layers: StyleSpecification["layers"] = [
     { id: "bg", type: "background", paint: { "background-color": "#0b0e14" } },
   ];
   const sources: StyleSpecification["sources"] = {};
-  const bm = game.basemap;
+  const bm = haveBakedTiles ? game.basemap : null;
 
   if (bm?.imagery) {
     sources.imagery = {
@@ -209,7 +218,7 @@ export default function MapView() {
     const tb = st.game.theatre?.bounds;
     const map = new maplibregl.Map({
       container: containerRef.current!,
-      style: buildStyle(st.game, st.layerVisible),
+      style: buildStyle(st.game, st.layerVisible, activeTileCount() > 0),
       ...(tb
         ? { bounds: [tb[0], tb[1], tb[2], tb[3]] as [number, number, number, number], fitBoundsOptions: { padding: 48 } }
         : { center: [30, 25] as [number, number], zoom: 2 }),
@@ -253,13 +262,14 @@ export default function MapView() {
     const map = mapRef.current;
     if (!map || !ready) return;
     const st = useGameStore.getState();
-    const bm = st.game.basemap;
+    const haveTiles = activeTileCount() > 0;
+    const bm = haveTiles ? st.game.basemap : null;
 
     // The constructor already built the initial style; only re-set it when the
     // basemap source actually changed, to avoid a tile-reload flash on load.
-    const key = `${basemapKey}#${tileEpoch}`;
+    const key = `${basemapKey}#${tileEpoch}#${haveTiles ? 1 : 0}`;
     if (styleKeyRef.current !== null && styleKeyRef.current !== key) {
-      map.setStyle(buildStyle(st.game, st.layerVisible));
+      map.setStyle(buildStyle(st.game, st.layerVisible, haveTiles));
       map.once("styledata", () => {
         ensureOverlay(map);
         syncTheatre();

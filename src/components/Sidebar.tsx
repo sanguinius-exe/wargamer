@@ -13,6 +13,7 @@ import {
 } from "../types";
 import { renderSymbol } from "../symbols";
 import { countTilesForBounds } from "../tiles/tileMath";
+import SessionPanel from "./SessionPanel";
 
 const IDENTITIES: Identity[] = ["friend", "hostile", "neutral", "unknown", "pending"];
 
@@ -60,6 +61,8 @@ export default function Sidebar() {
 
   return (
     <aside className="wg-sidebar">
+      <SessionPanel />
+
       <section className="wg-panel">
         <h2>Theatre of operations</h2>
         {theatre ? (

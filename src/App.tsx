@@ -4,6 +4,7 @@ import Topbar from "./components/Topbar";
 import Sidebar from "./components/Sidebar";
 import DivisionEditor from "./components/DivisionEditor";
 import { useGameStore } from "./store";
+import { useSession } from "./session";
 
 export default function App() {
   const selectedId = useGameStore((s) => s.selectedDivisionId);
@@ -33,6 +34,12 @@ export default function App() {
       window.removeEventListener("drop", drop);
     };
   }, [importFile]);
+
+  // Auto-join a session if the page was opened with an invite link (#s=code).
+  useEffect(() => {
+    const m = location.hash.match(/^#s=([a-z0-9]{4,12})$/i);
+    if (m && useSession.getState().status === "off") useSession.getState().start(m[1]);
+  }, []);
 
   // Esc cancels theatre drawing, otherwise closes the editor.
   useEffect(() => {
