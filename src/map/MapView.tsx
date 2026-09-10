@@ -217,6 +217,10 @@ export default function MapView() {
       attributionControl: { compact: true },
     });
     mapRef.current = map;
+    // A physical mouse wheel (common on Windows) fires one large discrete delta
+    // per notch, which MapLibre turns into a coarse stepped zoom. Shrinking the
+    // per-notch zoom rate (default 1/450) makes the eased steps blend together.
+    map.scrollZoom.setWheelZoomRate(1 / 600);
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
     map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-left");
     map.on("zoom", applyMarkerScale);
