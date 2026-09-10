@@ -25,6 +25,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+        env:
+          # Set this repo variable after deploying relay/ (see relay/README.md).
+          # Without it, shared sessions show "no relay configured".
+          VITE_RELAY_URL: ${{ vars.VITE_RELAY_URL }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

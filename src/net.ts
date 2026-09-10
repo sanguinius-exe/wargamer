@@ -1,16 +1,19 @@
 import * as Y from "yjs";
-import { joinRoom, selfId } from "trystero/torrent";
 import { GameFile, Division, SCHEMA_VERSION, uid } from "./types";
 import { useGameStore } from "./store";
 import { setActiveScenario } from "./tiles/tileStore";
 
 // ---------------------------------------------------------------------------
-// Peer-to-peer session sync. No server: state lives in a Yjs CRDT document
-// that every participant holds a copy of; Trystero relays doc updates over
-// WebRTC data channels (using public Nostr relays only for the initial
-// handshake). Yjs merges concurrent edits deterministically, so there is no
-// authority — anyone can move anything and everyone converges.
+// Shared session sync. The game state is a Yjs CRDT document every participant
+// holds a copy of; a tiny Cloudflare Worker (see /relay) relays doc updates
+// between the members of one room over a WebSocket. Yjs merges concurrent edits
+// deterministically, so there is no authority — anyone edits, everyone
+// converges. The relay never sees game state, only opaque bytes.
 // ---------------------------------------------------------------------------
+
+const RELAY_URL: string =
+  import.meta.env.VITE_RELAY_URL ||
+  (import.meta.env.DEV ? "ws://localhost:8787" : "");
 
 interface Hooks {
   onStatus: (s: "connecting" | "connected") => void;
@@ -20,14 +23,10 @@ interface Hooks {
 
 const ORIGIN = "local"; // tags Yjs transactions we initiated
 
-// Public WebTorrent trackers, used purely for the WebRTC handshake
-// (offer/answer/ICE). Trackers are built for anonymous peer discovery, unlike
-// Nostr relays which increasingly gate unknown keys. Swap/extend if peers
-// stop finding each other.
-const TRACKER_URLS = [
-  "wss://tracker.webtorrent.dev",
-  "wss://tracker.openwebtorrent.com",
-];
+// Binary frame tags (first byte).
+const T_UPDATE = 1;
+const T_STATE = 2;
+
 const PALETTE = [
   "#4c8dff", "#ff6b6b", "#3fb950", "#f2c94c",
   "#a371f7", "#4dd0e1", "#ff9f43", "#e879f9",
@@ -44,86 +43,63 @@ const clone = <T>(v: T): T =>
     ? structuredClone(v)
     : (JSON.parse(JSON.stringify(v)) as T);
 
-const copyBytes = (u: Uint8Array): Uint8Array => u.slice();
-
-type Room = ReturnType<typeof joinRoom>;
+function frame(tag: number, bytes: Uint8Array): ArrayBuffer {
+  const out = new Uint8Array(bytes.length + 1);
+  out[0] = tag;
+  out.set(bytes, 1);
+  return out.buffer;
+}
 
 let doc: Y.Doc | null = null;
-let room: Room | null = null;
+let ws: WebSocket | null = null;
 let teardown: (() => void) | null = null;
 let hooks: Hooks | null = null;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let closedByUser = false;
 
 let applyingRemote = false;
+let roomId = "";
+let selfCid = "";
 let selfName = "";
 let selfColor = "";
 let lastScenarioId: string | null = null;
 const peerMeta = new Map<string, { name: string; color: string }>();
-let broadcastMeta: (() => void) | null = null;
+
+interface Ctrl {
+  t: "hello" | "meta" | "left";
+  cid: string;
+  name?: string;
+  color?: string;
+}
 
 // ---------------------------------------------------------------------------
 
 export function connect(id: string, isHost: boolean, name: string, h: Hooks): void {
   hooks = h;
   selfName = name;
+  roomId = id;
+  selfCid = uid();
+  selfColor = colorFor(selfCid);
+  closedByUser = false;
+
+  if (!RELAY_URL) {
+    h.onError("No session relay configured (set VITE_RELAY_URL).");
+    return;
+  }
 
   doc = new Y.Doc();
   const yGame = doc.getMap<unknown>("game");
-  if (!yGame.has("divisions")) {
-    doc.transact(() => yGame.set("divisions", new Y.Map<Division>()), ORIGIN);
-  }
+  // Flat keys only: meta/theatre/basemap/teams/order as plain values, and each
+  // division under "div:<id>". No nested Y types — two peers independently
+  // creating the same nested Y.Map would conflict and drop one side's contents.
 
-  try {
-    room = joinRoom(
-      { appId: "wargamer-v1", password: id, relayUrls: TRACKER_URLS },
-      `s-${id}`,
-    );
-  } catch {
-    h.onError("Could not start the peer connection.");
-    return;
-  }
-  selfColor = colorFor(selfId || id);
-
-  const [sendUpdate, getUpdate] = room.makeAction<Uint8Array>("y-up");
-  const [sendState, getState] = room.makeAction<Uint8Array>("y-st");
-  const [sendMetaAction, getMeta] =
-    room.makeAction<{ name: string; color: string }>("meta");
-  broadcastMeta = () => sendMetaAction({ name: selfName, color: selfColor });
-
-  // Yjs document update -> broadcast to peers (unless it came from a peer).
+  // Yjs document update -> broadcast (unless it came from a peer).
   const onDocUpdate = (update: Uint8Array, origin: unknown) => {
-    if (origin !== "remote" && room) sendUpdate(copyBytes(update));
-  };
-  doc.on("update", onDocUpdate);
-
-  getUpdate((data) => {
-    if (doc) Y.applyUpdate(doc, new Uint8Array(data), "remote");
-  });
-  getState((data) => {
-    if (doc) Y.applyUpdate(doc, new Uint8Array(data), "remote");
-  });
-  getMeta((m, peerId) => {
-    peerMeta.set(peerId, m);
-    pushPeers();
-  });
-
-  let connected = false;
-  const markConnected = () => {
-    if (!connected) {
-      connected = true;
-      hooks?.onStatus("connected");
+    if (origin !== "remote" && ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(frame(T_UPDATE, update));
     }
   };
-
-  room.onPeerJoin((peerId) => {
-    markConnected();
-    if (doc) sendState(copyBytes(Y.encodeStateAsUpdate(doc)), peerId);
-    sendMetaAction({ name: selfName, color: selfColor }, peerId);
-  });
-  room.onPeerLeave((peerId) => {
-    peerMeta.delete(peerId);
-    pushPeers();
-  });
-  const connectTimer = setTimeout(markConnected, 3000);
+  doc.on("update", onDocUpdate);
 
   // Yjs -> local store.
   const yObserver = (_events: unknown, txn: Y.Transaction) => {
@@ -152,44 +128,122 @@ export function connect(id: string, isHost: boolean, name: string, h: Hooks): vo
   });
 
   teardown = () => {
-    clearTimeout(connectTimer);
     if (raf) cancelAnimationFrame(raf);
+    if (reconnectTimer) clearTimeout(reconnectTimer);
     doc?.off("update", onDocUpdate);
     yGame.unobserveDeep(yObserver);
     storeUnsub();
   };
 
   h.onStatus("connecting");
-  pushPeers();
+  openSocket();
 
-  // The host owns the starting scenario; publish it now. Guests just apply
-  // whatever arrives.
+  // The host owns the starting scenario; publish it into the doc now.
   if (isHost) pushFull(useGameStore.getState().game);
 }
 
+function openSocket(): void {
+  let retryMs = 800;
+  let socket: WebSocket;
+  try {
+    socket = new WebSocket(
+      `${RELAY_URL}?room=${encodeURIComponent(roomId)}&cid=${selfCid}`,
+    );
+  } catch {
+    hooks?.onError("Invalid relay URL.");
+    return;
+  }
+  socket.binaryType = "arraybuffer";
+  ws = socket;
+
+  socket.onopen = () => {
+    retryMs = 800;
+    hooks?.onStatus("connected");
+    sendCtrl({ t: "hello", cid: selfCid, name: selfName, color: selfColor });
+    if (doc) socket.send(frame(T_STATE, Y.encodeStateAsUpdate(doc)));
+  };
+
+  socket.onmessage = (ev) => {
+    if (typeof ev.data === "string") {
+      try {
+        handleCtrl(JSON.parse(ev.data) as Ctrl);
+      } catch {
+        /* ignore malformed control frame */
+      }
+      return;
+    }
+    const view = new Uint8Array(ev.data as ArrayBuffer);
+    const tag = view[0];
+    if ((tag === T_UPDATE || tag === T_STATE) && doc) {
+      Y.applyUpdate(doc, view.subarray(1), "remote");
+    }
+  };
+
+  socket.onclose = () => {
+    if (ws === socket) ws = null;
+    if (closedByUser) return;
+    if (peerMeta.size) {
+      peerMeta.clear();
+      pushPeers();
+    }
+    hooks?.onStatus("connecting");
+    reconnectTimer = setTimeout(openSocket, retryMs);
+    retryMs = Math.min(Math.round(retryMs * 1.7), 10000);
+  };
+
+  socket.onerror = () => {
+    /* an onclose follows; reconnect handled there */
+  };
+}
+
+function handleCtrl(m: Ctrl): void {
+  if (!m || !m.cid || m.cid === selfCid) return;
+  if (m.t === "hello") {
+    const known = peerMeta.has(m.cid);
+    peerMeta.set(m.cid, { name: m.name ?? "?", color: m.color ?? "#8892a0" });
+    pushPeers();
+    if (!known) {
+      // Introduce ourselves back and hand them the current doc state.
+      sendCtrl({ t: "hello", cid: selfCid, name: selfName, color: selfColor });
+      if (doc && ws?.readyState === WebSocket.OPEN) {
+        ws.send(frame(T_STATE, Y.encodeStateAsUpdate(doc)));
+      }
+    }
+  } else if (m.t === "meta") {
+    peerMeta.set(m.cid, { name: m.name ?? "?", color: m.color ?? "#8892a0" });
+    pushPeers();
+  } else if (m.t === "left") {
+    if (peerMeta.delete(m.cid)) pushPeers();
+  }
+}
+
 export function disconnect(): void {
+  closedByUser = true;
   teardown?.();
   teardown = null;
   try {
-    room?.leave();
+    ws?.close(1000);
   } catch {
-    /* ignore */
+    /* already closed */
   }
-  room = null;
+  ws = null;
   doc?.destroy();
   doc = null;
   peerMeta.clear();
   applyingRemote = false;
   hooks = null;
-  broadcastMeta = null;
 }
 
 export function setName(name: string): void {
   selfName = name;
-  broadcastMeta?.();
+  sendCtrl({ t: "meta", cid: selfCid, name, color: selfColor });
 }
 
 // ---------------------------------------------------------------------------
+
+function sendCtrl(m: Ctrl): void {
+  if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(m));
+}
 
 function pushPeers(): void {
   hooks?.onPeers(
@@ -204,20 +258,20 @@ function index(list: Division[]): Record<string, Division> {
 }
 
 function readGame(yGame: Y.Map<unknown>): GameFile {
-  const divsMap = yGame.get("divisions") as Y.Map<Division> | undefined;
   const order = (yGame.get("order") as string[] | undefined) ?? [];
+  const byId = new Map<string, Division>();
+  yGame.forEach((v, k) => {
+    if (k.startsWith("div:")) byId.set(k.slice(4), v as Division);
+  });
   const divisions: Division[] = [];
-  const seen = new Set<string>();
   for (const did of order) {
-    const d = divsMap?.get(did);
+    const d = byId.get(did);
     if (d) {
       divisions.push(clone(d));
-      seen.add(did);
+      byId.delete(did);
     }
   }
-  divsMap?.forEach((d, did) => {
-    if (!seen.has(did)) divisions.push(clone(d));
-  });
+  for (const d of byId.values()) divisions.push(clone(d));
 
   const meta = yGame.get("meta") as GameFile["meta"] | undefined;
   const theatre = yGame.get("theatre") as GameFile["theatre"] | undefined;
@@ -245,8 +299,7 @@ function readGame(yGame: Y.Map<unknown>): GameFile {
 function pullFromY(): void {
   if (!doc) return;
   const yGame = doc.getMap<unknown>("game");
-  const divs = yGame.get("divisions") as Y.Map<unknown> | undefined;
-  if (!yGame.get("meta") && (!divs || divs.size === 0)) return;
+  if (!yGame.get("meta")) return; // nothing meaningful has arrived yet
 
   applyingRemote = true;
   try {
@@ -265,7 +318,6 @@ function pullFromY(): void {
 function pushDiff(a: GameFile, b: GameFile): void {
   if (!doc) return;
   const yGame = doc.getMap<unknown>("game");
-  const yDivs = yGame.get("divisions") as Y.Map<Division>;
   doc.transact(() => {
     if (a.meta !== b.meta) yGame.set("meta", b.meta);
     if (a.theatre !== b.theatre) yGame.set("theatre", b.theatre);
@@ -274,8 +326,8 @@ function pushDiff(a: GameFile, b: GameFile): void {
     if (a.divisions !== b.divisions) {
       const before = index(a.divisions);
       const after = index(b.divisions);
-      for (const d of b.divisions) if (before[d.id] !== d) yDivs.set(d.id, d);
-      for (const d of a.divisions) if (!after[d.id]) yDivs.delete(d.id);
+      for (const d of b.divisions) if (before[d.id] !== d) yGame.set(`div:${d.id}`, d);
+      for (const d of a.divisions) if (!after[d.id]) yGame.delete(`div:${d.id}`);
       const ao = a.divisions.map((d) => d.id).join("|");
       const bo = b.divisions.map((d) => d.id).join("|");
       if (ao !== bo) yGame.set("order", b.divisions.map((d) => d.id));
@@ -286,14 +338,17 @@ function pushDiff(a: GameFile, b: GameFile): void {
 function pushFull(g: GameFile): void {
   if (!doc) return;
   const yGame = doc.getMap<unknown>("game");
-  const yDivs = yGame.get("divisions") as Y.Map<Division>;
   doc.transact(() => {
     yGame.set("meta", g.meta);
     yGame.set("theatre", g.theatre);
     yGame.set("basemap", g.basemap);
     yGame.set("teams", g.teams);
-    yDivs.clear();
-    for (const d of g.divisions) yDivs.set(d.id, d);
+    const stale: string[] = [];
+    yGame.forEach((_v, k) => {
+      if (k.startsWith("div:")) stale.push(k);
+    });
+    for (const k of stale) yGame.delete(k);
+    for (const d of g.divisions) yGame.set(`div:${d.id}`, d);
     yGame.set("order", g.divisions.map((d) => d.id));
   }, ORIGIN);
 }

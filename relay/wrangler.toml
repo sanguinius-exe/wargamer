@@ -1,0 +1,16 @@
+name = "wargamer-relay"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+[[durable_objects.bindings]]
+name = "ROOM"
+class_name = "Room"
+
+# SQLite-backed DO classes are the ones available on the free plan.
+# (This relay keeps no storage; the class just needs declaring.)
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]
+
+[observability]
+enabled = true
