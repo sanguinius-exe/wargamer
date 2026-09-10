@@ -1,0 +1,596 @@
+:root {
+  --bg: #0b0e14;
+  --panel: #141922;
+  --panel-2: #1b212c;
+  --line: #2a323f;
+  --text: #d7dee8;
+  --muted: #8794a5;
+  --accent: #f2b134;
+  --accent-2: #4c8dff;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font: inherit;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+button:hover {
+  border-color: #3a4553;
+  background: #232b37;
+}
+button.primary {
+  background: var(--accent-2);
+  border-color: var(--accent-2);
+  color: #fff;
+}
+button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+button.danger {
+  border-color: #5a2626;
+  color: #f0817a;
+}
+button.danger:hover {
+  background: #2a1a1a;
+}
+button.wg-icon {
+  padding: 2px 6px;
+  background: transparent;
+  border-color: transparent;
+  line-height: 1;
+}
+button.wg-icon:hover {
+  background: var(--panel-2);
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 7px;
+}
+input[type="color"] {
+  padding: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+textarea {
+  resize: vertical;
+  min-height: 60px;
+  width: 100%;
+}
+
+/* ---------- layout ---------- */
+
+.wg-app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.wg-topbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  flex: none;
+}
+.wg-brand {
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+.wg-brand-mark {
+  color: var(--accent);
+  margin-right: 4px;
+}
+.wg-scenario-name {
+  flex: 1;
+  max-width: 340px;
+  font-weight: 600;
+}
+.wg-topbar-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+.wg-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.wg-sidebar {
+  width: 296px;
+  flex: none;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.wg-map-wrap {
+  flex: 1;
+  position: relative;
+  min-width: 0;
+}
+.wg-map {
+  position: absolute;
+  inset: 0;
+}
+
+.wg-editor {
+  width: 320px;
+  flex: none;
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+  overflow-y: auto;
+  padding: 12px;
+}
+
+/* ---------- sidebar ---------- */
+
+.wg-panel {
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+.wg-panel h2 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+.wg-muted {
+  color: var(--muted);
+  margin: 4px 0 8px;
+}
+.wg-bounds {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+.wg-row {
+  display: flex;
+  gap: 8px;
+}
+
+.wg-team {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 10px;
+}
+.wg-team-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.wg-team-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  background: transparent;
+  border-color: transparent;
+  padding: 3px 4px;
+}
+.wg-team-name:hover,
+.wg-team-name:focus {
+  background: var(--panel);
+  border-color: var(--line);
+}
+.wg-count {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.wg-roster {
+  list-style: none;
+  margin: 8px 0 6px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.wg-roster-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 6px;
+  border-radius: 5px;
+  cursor: grab;
+  border: 1px solid transparent;
+}
+.wg-roster-row:hover {
+  background: var(--panel);
+}
+.wg-roster-row.selected {
+  border-color: var(--accent-2);
+  background: #16253d;
+}
+.wg-roster-row.reserve {
+  opacity: 0.62;
+}
+.wg-roster-sym {
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.wg-roster-sym b {
+  color: var(--text);
+  margin-right: 3px;
+}
+.wg-roster-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wg-roster-eff {
+  font-family: ui-monospace, monospace;
+  font-weight: 700;
+  font-size: 11px;
+}
+.wg-reserve-tag {
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.wg-add {
+  width: 100%;
+  background: transparent;
+  border-style: dashed;
+  color: var(--muted);
+}
+.wg-add:hover {
+  color: var(--text);
+}
+.wg-add-team {
+  margin-top: 4px;
+}
+.wg-notes {
+  min-height: 80px;
+}
+.wg-tip {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* ---------- editor ---------- */
+
+.wg-editor-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  border-left: 3px solid var(--line);
+  padding-left: 8px;
+  margin-bottom: 12px;
+}
+.wg-editor-sym {
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 0.5px;
+}
+.wg-editor-name {
+  font-weight: 600;
+  font-size: 14px;
+  width: 100%;
+  background: transparent;
+  border-color: transparent;
+  padding: 2px 4px;
+  margin-top: 2px;
+}
+.wg-editor-name:hover,
+.wg-editor-name:focus {
+  background: var(--panel-2);
+  border-color: var(--line);
+}
+
+.wg-eff-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 12px;
+}
+.wg-eff-summary strong {
+  font-size: 18px;
+  font-family: ui-monospace, monospace;
+}
+
+.wg-field-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.wg-field-grid label,
+.wg-field-full {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.wg-field-full {
+  margin-bottom: 12px;
+}
+.wg-field-grid select {
+  text-transform: capitalize;
+}
+
+.wg-meters {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.wg-meter-top {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+}
+.wg-meter-val {
+  font-family: ui-monospace, monospace;
+  color: var(--muted);
+}
+.wg-meter input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
+
+.wg-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.wg-check input {
+  width: auto;
+}
+
+.wg-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.wg-editor-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.wg-editor-preview {
+  display: block;
+  flex: none;
+}
+.wg-editor-preview svg {
+  display: block;
+  overflow: visible;
+}
+.wg-sidc {
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+  color: var(--muted);
+  margin: -6px 0 12px;
+  word-break: break-all;
+}
+
+/* ---------- NATO map markers ---------- */
+
+.wg-marker {
+  /* keep MapLibre's own position:absolute — it is the positioning context
+     for the absolutely-placed icon and label below */
+  width: 0;
+  height: 0;
+  cursor: grab;
+  user-select: none;
+}
+.wg-mk-inner {
+  position: absolute;
+  line-height: 0;
+  transform: scale(var(--mk-scale, 1));
+  /* left / top / transform-origin are set per-marker to the SIDC anchor */
+  filter: drop-shadow(0 0 1.5px #000) drop-shadow(0 0 2px rgba(0, 0, 0, 0.55));
+}
+.wg-mk-inner svg {
+  display: block;
+  overflow: visible;
+}
+.wg-marker[data-reserve="1"] {
+  opacity: 0.5;
+}
+.wg-marker.selected .wg-mk-inner {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.wg-mk-label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, 0);
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(8, 10, 16, 0.62);
+  font: 700 11px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: #fff;
+  white-space: nowrap;
+  pointer-events: none;
+  text-shadow: 0 1px 2px #000;
+}
+.wg-mk-label .ef {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- overlays ---------- */
+
+.wg-hint {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--accent);
+  color: #000;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 20px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+  z-index: 5;
+}
+
+.wg-toast {
+  position: fixed;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 16px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  z-index: 20;
+}
+.wg-toast.error {
+  border-color: #6b2b2b;
+  color: #f0817a;
+}
+
+/* maplibre control tweaks for dark bg */
+.maplibregl-ctrl-group {
+  background: var(--panel-2);
+}
+.maplibregl-ctrl-group button + button {
+  border-top-color: var(--line);
+}
+.maplibregl-ctrl-attrib {
+  background: rgba(20, 25, 34, 0.8) !important;
+}
+.maplibregl-ctrl-attrib a {
+  color: var(--muted);
+}
+
+/* ---------- identity + roster symbol ---------- */
+
+.wg-team-head {
+  border-left: 3px solid var(--line);
+  padding-left: 7px;
+}
+.wg-identity {
+  width: 100%;
+  margin: 6px 0 2px;
+  font-size: 11px;
+}
+.wg-roster-sym {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.wg-roster-sym svg {
+  overflow: visible;
+}
+
+/* ---------- basemap bake panel ---------- */
+
+.wg-bakeform {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+}
+.wg-bakeform .wg-check {
+  margin: 0;
+}
+.wg-slider {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.wg-slider input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.wg-bake {
+  margin: 8px 0;
+}
+.wg-baketween {
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 6px;
+}
+.wg-progress {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+.wg-progress i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
+.wg-panel .wg-check + .wg-check {
+  margin-top: 6px;
+}
