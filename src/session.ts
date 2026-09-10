@@ -116,10 +116,17 @@ export const useSession = create<SessionStore>((set, get) => ({
       return;
     }
     const isHost = sessionId == null;
-    const cid =
-      typeof crypto !== "undefined" && "randomUUID" in crypto
-        ? crypto.randomUUID()
-        : Math.random().toString(36).slice(2);
+    // Stable per-tab id so a reload reconnects to the same seat.
+    const cidKey = `wargamer:cid:${id}`;
+    let cid: string;
+    try {
+      cid =
+        sessionStorage.getItem(cidKey) ??
+        (crypto?.randomUUID?.() || Math.random().toString(36).slice(2));
+      sessionStorage.setItem(cidKey, cid);
+    } catch {
+      cid = crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
+    }
     set({
       status: "connecting",
       sessionId: id,
@@ -153,6 +160,12 @@ export const useSession = create<SessionStore>((set, get) => ({
     net?.disconnect();
     net = null;
     clearHash();
+    try {
+      const id = get().sessionId;
+      if (id) sessionStorage.removeItem(`wargamer:cid:${id}`);
+    } catch {
+      /* ignore */
+    }
     set({
       status: "off",
       sessionId: null,
@@ -201,4 +214,5 @@ export const useSession = create<SessionStore>((set, get) => ({
   submitMoves: () => net?.playerSubmit(),
   recallMoves: () => net?.playerRecall(),
 }));
+
 

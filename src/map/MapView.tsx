@@ -262,12 +262,31 @@ export default function MapView() {
     map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-left");
     map.on("zoom", applyMarkerScale);
 
+    // MapLibre's "load" event is unreliable in some environments (it can never
+    // fire even once the style + tiles are ready), so poll isStyleLoaded() and
+    // stop the moment we're ready. markReady is idempotent.
+    let readyDone = false;
     const markReady = () => {
+      if (readyDone || !mapRef.current || !map.isStyleLoaded()) return;
+      readyDone = true;
+      clearInterval(readyPoll);
       ensureOverlay(map);
       setReady(true);
     };
-    if (map.isStyleLoaded()) markReady();
-    else map.once("load", markReady);
+    const readyPoll = setInterval(markReady, 200);
+    markReady();
+    map.once("load", markReady);
+
+    // setStyle() (basemap changes) wipes our custom sources/layers — re-add
+    // them and repaint whenever the style settles.
+    map.on("styledata", () => {
+      if (!mapRef.current || !map.isStyleLoaded()) return;
+      ensureOverlay(map);
+      if (readyDone) {
+        syncTheatre();
+        syncPlan();
+      }
+    });
 
     map.on("click", (e) => {
       const s = useGameStore.getState();
@@ -276,6 +295,7 @@ export default function MapView() {
     });
 
     return () => {
+      clearInterval(readyPoll);
       map.remove();
       mapRef.current = undefined;
       markersRef.current.clear();
@@ -350,6 +370,7 @@ export default function MapView() {
 
   // --- theatre mask + outline -----------------------------------------
   function ensureOverlay(map: maplibregl.Map) {
+    if (!map.isStyleLoaded()) return;
     if (!map.getSource("theatre-mask")) {
       map.addSource("theatre-mask", { type: "geojson", data: EMPTY_FC });
       map.addLayer({
@@ -401,6 +422,7 @@ export default function MapView() {
   function syncPlan() {
     const map = mapRef.current;
     if (!map || !ready) return;
+    ensureOverlay(map);
     const game = useGameStore.getState().game;
     const divById = new Map(game.divisions.map((d) => [d.id, d]));
     const mode = boardMode();
@@ -458,6 +480,7 @@ export default function MapView() {
   function syncTheatre() {
     const map = mapRef.current;
     if (!map || !ready) return;
+    ensureOverlay(map);
     const b = useGameStore.getState().game.theatre?.bounds ?? null;
     (map.getSource("theatre-mask") as maplibregl.GeoJSONSource | undefined)?.setData(maskFC(b));
     (map.getSource("theatre-outline") as maplibregl.GeoJSONSource | undefined)?.setData(outlineFC(b));
@@ -482,6 +505,7 @@ export default function MapView() {
   function syncMarkers() {
     const map = mapRef.current;
     if (!map || !ready) return;
+    ensureOverlay(map);
     const s = useGameStore.getState();
     const curDivisions = s.game.divisions;
     const curTeams = s.game.teams;

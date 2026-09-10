@@ -35,10 +35,16 @@ export default function App() {
     };
   }, [importFile]);
 
-  // Auto-join a session if the page was opened with an invite link (#s=code).
+  // Auto-join a session from an invite link (#s=code) — on load and if the
+  // hash is pasted into an already-open tab.
   useEffect(() => {
-    const m = location.hash.match(/^#s=([a-z0-9]{4,12})$/i);
-    if (m && useSession.getState().status === "off") useSession.getState().start(m[1]);
+    const tryJoin = () => {
+      const m = location.hash.match(/^#s=([a-z0-9]{4,12})$/i);
+      if (m && useSession.getState().status === "off") useSession.getState().start(m[1]);
+    };
+    tryJoin();
+    window.addEventListener("hashchange", tryJoin);
+    return () => window.removeEventListener("hashchange", tryJoin);
   }, []);
 
   // Esc cancels theatre drawing, otherwise closes the editor.
