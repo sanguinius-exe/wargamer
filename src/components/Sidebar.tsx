@@ -293,9 +293,14 @@ function ScenarioTab({ restricted }: { restricted: boolean }) {
                     className="wg-identity"
                     value={team.identity}
                     title="APP-6 affiliation (frame shape)"
-                    onChange={(e) =>
-                      updateTeam(team.id, { identity: e.target.value as Identity })
-                    }
+                    onChange={(e) => {
+                      const identity = e.target.value as Identity;
+                      // Changing the icon shape shouldn't also change the
+                      // colour: if the team was riding the identity's
+                      // default colour, lock in what it currently shows.
+                      const color = team.color ?? teamColor(team);
+                      updateTeam(team.id, { identity, color });
+                    }}
                   >
                     {IDENTITIES.map((i) => (
                       <option key={i} value={i}>
