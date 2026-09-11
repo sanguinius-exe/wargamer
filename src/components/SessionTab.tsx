@@ -2,6 +2,7 @@ import { useState, type CSSProperties } from "react";
 import { useSession } from "../session";
 import { useGameStore } from "../store";
 import { teamColor } from "../types";
+import { soundEnabled, setSoundEnabled } from "../sound";
 
 export default function SessionTab() {
   const status = useSession((s) => s.status);
@@ -67,6 +68,13 @@ function ConnectedPanel() {
   const leave = useSession((s) => s.leave);
   const showToast = useGameStore((s) => s.showToast);
 
+  const [snd, setSnd] = useState(soundEnabled());
+  const toggleSound = () => {
+    const v = !snd;
+    setSnd(v);
+    setSoundEnabled(v);
+  };
+
   const inviteLink =
     sessionId && `${location.origin}${location.pathname}#s=${sessionId}`;
   const copyInvite = () => {
@@ -82,6 +90,13 @@ function ConnectedPanel() {
       <div className="wg-session-code">
         <code>{sessionId}</code>
         <span className="wg-muted">{role === "gm" ? "you are GM" : role}</span>
+        <button
+          className="wg-icon"
+          title={snd ? "Mute session sounds" : "Unmute session sounds"}
+          onClick={toggleSound}
+        >
+          {snd ? "🔔" : "🔕"}
+        </button>
       </div>
       <button className="wg-full" onClick={copyInvite}>
         Copy invite link

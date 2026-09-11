@@ -324,6 +324,11 @@ textarea {
   align-items: baseline;
   gap: 8px;
 }
+.wg-session-code .wg-icon {
+  margin-left: auto;
+  align-self: center;
+  font-size: 13px;
+}
 .wg-session-code code {
   font-size: 15px;
   font-weight: 700;

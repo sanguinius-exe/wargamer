@@ -2,6 +2,7 @@ import { GameFile, Division, SCHEMA_VERSION } from "./types";
 import { useGameStore, setAutosavePaused } from "./store";
 import { useSession, PlayerInfo, Submission } from "./session";
 import { setActiveScenario } from "./tiles/tileStore";
+import { playSubmitReceived, playTurnReleased } from "./sound";
 
 // ---------------------------------------------------------------------------
 // GM-run turn engine over the relay WebSocket (see /relay).
@@ -213,6 +214,7 @@ function handleAsGM(msg: Msg): void {
           : s.submissions,
       });
       broadcastLobby();
+      if (submitted) playSubmitReceived();
       break;
     }
   }
@@ -317,6 +319,7 @@ function handleAsPlayer(msg: Msg): void {
     if (msg.game.meta.id) void setActiveScenario(msg.game.meta.id);
     useGameStore.setState((st) => ({ tileEpoch: st.tileEpoch + 1 }));
     if (msg.turn !== lastAppliedTurn) {
+      if (lastAppliedTurn !== 0) playTurnReleased(); // not on the first view
       lastAppliedTurn = msg.turn;
       useSession.setState({ proposals: {} });
     }
