@@ -9,7 +9,7 @@ import {
   GameFile,
   effectiveness,
   effColor,
-  IDENTITY_COLOR,
+  teamColor,
 } from "../types";
 import { renderSymbol } from "../symbols";
 import { IMAGERY_URL, IMAGERY_ATTRIB, REFERENCE_ATTRIB } from "../tiles/bake";
@@ -452,7 +452,7 @@ export default function MapView() {
     };
     const colorOf = (teamId: string | null | undefined) => {
       const t = game.teams.find((x) => x.id === teamId);
-      return t ? IDENTITY_COLOR[t.identity] : "#f2b134";
+      return t ? teamColor(t) : "#f2b134";
     };
     if (mode.kind === "player" && mode.phase === "planning") {
       for (const [id, to] of Object.entries(mode.proposals)) {

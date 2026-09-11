@@ -757,10 +757,24 @@ textarea {
   border-left: 3px solid var(--line);
   padding-left: 7px;
 }
-.wg-identity {
-  width: 100%;
+.wg-team-style {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   margin: 6px 0 2px;
+}
+.wg-identity {
+  flex: 1;
+  min-width: 0;
   font-size: 11px;
+}
+.wg-team-style input[type="color"] {
+  flex: none;
+  width: 26px;
+  height: 24px;
+  padding: 0;
+  border-radius: 5px;
+  cursor: pointer;
 }
 .wg-roster-sym {
   flex: none;

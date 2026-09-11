@@ -11,6 +11,7 @@ import {
   makeTeam,
   slug,
   uid,
+  TEAM_PALETTE,
 } from "./types";
 import { normalizeGame } from "./schema";
 import {
@@ -323,7 +324,15 @@ export const useGameStore = create<State>((set, get) => ({
       const used = new Set(s.game.teams.map((t) => t.identity));
       const order: Identity[] = ["friend", "hostile", "neutral", "unknown", "pending"];
       const identity = order.find((i) => !used.has(i)) ?? "neutral";
+      const usedColors = new Set(s.game.teams.map((t) => t.color));
+      // Give extra teams a distinct colour out of the box; the first two keep
+      // their identity default.
+      const color =
+        s.game.teams.length >= 2
+          ? TEAM_PALETTE.find((c) => !usedColors.has(c))
+          : undefined;
       const team = makeTeam(`Team ${s.game.teams.length + 1}`, identity);
+      if (color) team.color = color;
       return { game: { ...s.game, teams: [...s.game.teams, team] } };
     }),
 

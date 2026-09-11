@@ -5,7 +5,7 @@ import {
   Team,
   Identity,
   IDENTITY_LABEL,
-  IDENTITY_COLOR,
+  teamColor,
   ECHELON_SYMBOL,
   TYPE_LABEL,
   effectiveness,
@@ -252,7 +252,7 @@ function ScenarioTab({ restricted }: { restricted: boolean }) {
             <div className="wg-team" key={team.id}>
               <div
                 className="wg-team-head"
-                style={{ borderLeftColor: IDENTITY_COLOR[team.identity] }}
+                style={{ borderLeftColor: teamColor(team) }}
               >
                 {restricted ? (
                   <span className="wg-team-name" style={{ padding: "3px 4px" }}>
@@ -288,19 +288,37 @@ function ScenarioTab({ restricted }: { restricted: boolean }) {
               </div>
 
               {!restricted && (
-                <select
-                  className="wg-identity"
-                  value={team.identity}
-                  onChange={(e) =>
-                    updateTeam(team.id, { identity: e.target.value as Identity })
-                  }
-                >
-                  {IDENTITIES.map((i) => (
-                    <option key={i} value={i}>
-                      {IDENTITY_LABEL[i]}
-                    </option>
-                  ))}
-                </select>
+                <div className="wg-team-style">
+                  <select
+                    className="wg-identity"
+                    value={team.identity}
+                    title="APP-6 affiliation (frame shape)"
+                    onChange={(e) =>
+                      updateTeam(team.id, { identity: e.target.value as Identity })
+                    }
+                  >
+                    {IDENTITIES.map((i) => (
+                      <option key={i} value={i}>
+                        {IDENTITY_LABEL[i]}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="color"
+                    value={teamColor(team)}
+                    title="Team colour"
+                    onChange={(e) => updateTeam(team.id, { color: e.target.value })}
+                  />
+                  {team.color && (
+                    <button
+                      className="wg-icon"
+                      title="Use the identity's default colour"
+                      onClick={() => updateTeam(team.id, { color: undefined })}
+                    >
+                      ⟲
+                    </button>
+                  )}
+                </div>
               )}
 
               <ul className="wg-roster">

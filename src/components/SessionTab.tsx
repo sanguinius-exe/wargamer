@@ -1,7 +1,7 @@
 import { useState, type CSSProperties } from "react";
 import { useSession } from "../session";
 import { useGameStore } from "../store";
-import { IDENTITY_COLOR } from "../types";
+import { teamColor } from "../types";
 
 export default function SessionTab() {
   const status = useSession((s) => s.status);
@@ -201,7 +201,7 @@ function GmView() {
                       className="wg-dot"
                       style={
                         {
-                          "--c": team ? IDENTITY_COLOR[team.identity] : "#888",
+                          "--c": team ? teamColor(team) : "#888",
                         } as CSSProperties
                       }
                     />
@@ -276,7 +276,7 @@ function PlayerView() {
         <span className={`wg-phase wg-phase-${phase}`}>{phase}</span>
       </div>
       <p className="wg-muted">
-        Team: <b style={{ color: team ? IDENTITY_COLOR[team.identity] : undefined }}>{team?.name ?? "—"}</b>
+        Team: <b style={{ color: team ? teamColor(team) : undefined }}>{team?.name ?? "—"}</b>
       </p>
 
       {phase === "adjudicating" ? (
@@ -328,7 +328,7 @@ function PlayerView() {
             <li key={p.cid} className={`wg-prow ${p.online ? "" : "offline"}`}>
               <span
                 className="wg-dot"
-                style={{ "--c": t ? IDENTITY_COLOR[t.identity] : "#888" } as CSSProperties}
+                style={{ "--c": t ? teamColor(t) : "#888" } as CSSProperties}
               />
               <span className="wg-pname">
                 {p.name}

@@ -5,6 +5,7 @@ import {
   Team,
   buildSIDC,
   effectiveness,
+  teamColor,
   IDENTITY_LABEL,
 } from "./types";
 
@@ -40,11 +41,13 @@ export function renderSymbol(
   const detail = opts.detail ?? "full";
   const sidc = buildSIDC(d, team.identity);
   const eff = effectiveness(d.status);
+  const color = teamColor(team);
 
   const key = [
     sidc,
     size,
     detail,
+    color,
     d.name,
     d.higherFormation,
     d.reinforced ?? "",
@@ -57,8 +60,9 @@ export function renderSymbol(
   if (hit) return hit;
 
   // milsymbol chokes on amplifier keys whose value is undefined, so only
-  // add a key when it carries a real string.
-  const options: SymbolOptions = { size };
+  // add a key when it carries a real string. The team's colour tints the
+  // frame fill; its identity still fixes the frame *shape*.
+  const options: SymbolOptions = { size, fill: true, fillColor: color };
   if (detail !== "none") {
     const rr = reinforcedGlyph(d.reinforced);
     if (rr) options.reinforcedReduced = rr;

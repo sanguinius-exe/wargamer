@@ -155,8 +155,22 @@ export interface Division {
 export interface Team {
   id: string;
   name: string;
+  /** APP-6 affiliation — drives the symbol *frame shape*. */
   identity: Identity;
+  /** Optional custom colour; overrides the identity's default everywhere. */
+  color?: string;
 }
+
+/** The colour to draw a team in — its custom colour, or its identity default. */
+export function teamColor(team: Team): string {
+  return team.color ?? IDENTITY_COLOR[team.identity];
+}
+
+/** Spread for extra teams beyond the five standard identities. */
+export const TEAM_PALETTE = [
+  "#4c8dff", "#ff6b6b", "#3fb950", "#f2c94c", "#a371f7",
+  "#4dd0e1", "#ff9f43", "#e879f9", "#9ccc65", "#ff8a65",
+];
 
 export interface Theatre {
   /** [west, south, east, north] in degrees. */
