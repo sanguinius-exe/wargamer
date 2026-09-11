@@ -17,6 +17,11 @@ const RELAY_URL: string =
   import.meta.env.VITE_RELAY_URL ||
   (import.meta.env.DEV ? "ws://localhost:8787" : "");
 
+// Shared secret baked into the build (see relay/README.md). Blocks blind
+// bots/scanners from ever reaching the relay; not a substitute for real auth
+// since it ships in the public JS bundle like RELAY_URL itself.
+const RELAY_TOKEN: string = import.meta.env.VITE_RELAY_TOKEN || "";
+
 interface ConnectOpts {
   sessionId: string;
   isHost: boolean;
@@ -82,8 +87,9 @@ function openSocket(): void {
   let retryMs = 800;
   let socket: WebSocket;
   try {
+    const tokenParam = RELAY_TOKEN ? `&token=${encodeURIComponent(RELAY_TOKEN)}` : "";
     socket = new WebSocket(
-      `${RELAY_URL}?room=${encodeURIComponent(opts.sessionId)}&cid=${opts.cid}`,
+      `${RELAY_URL}?room=${encodeURIComponent(opts.sessionId)}&cid=${opts.cid}${tokenParam}`,
     );
   } catch {
     useSession.setState({ status: "off", error: "Invalid relay URL." });

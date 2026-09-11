@@ -29,6 +29,10 @@ jobs:
           # Set this repo variable after deploying relay/ (see relay/README.md).
           # Without it, shared sessions show "no relay configured".
           VITE_RELAY_URL: ${{ vars.VITE_RELAY_URL }}
+          # Optional shared secret; must match the relay's RELAY_TOKEN secret.
+          # Kept as a repo *secret* (not a var) so it doesn't show in the Actions UI,
+          # though it still ends up in the public built JS bundle like the URL above.
+          VITE_RELAY_TOKEN: ${{ secrets.VITE_RELAY_TOKEN }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

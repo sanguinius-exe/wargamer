@@ -9,17 +9,29 @@
 
 export interface Env {
   ROOM: DurableObjectNamespace;
+  // Shared secret the client build embeds as VITE_RELAY_TOKEN. Set via
+  // `wrangler secret put RELAY_TOKEN`. When unset (e.g. local `wrangler dev`),
+  // the check is skipped and the relay stays open, as before.
+  RELAY_TOKEN?: string;
 }
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
+
+    // Gate everything, including the plain-text banner, so unauthenticated
+    // scanners/bots get an opaque 403 instead of confirmation this is a
+    // wargamer relay.
+    if (env.RELAY_TOKEN && url.searchParams.get("token") !== env.RELAY_TOKEN) {
+      return new Response("forbidden", { status: 403 });
+    }
+
     if (request.headers.get("Upgrade") !== "websocket") {
       return new Response("wargamer relay: connect a WebSocket with ?room=<id>", {
         status: 200,
         headers: { "content-type": "text/plain" },
       });
     }
-    const url = new URL(request.url);
     const room = url.searchParams.get("room");
     if (!room) return new Response("missing ?room", { status: 400 });
 
