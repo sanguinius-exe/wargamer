@@ -62,12 +62,22 @@ let stashedGame: GameFile | null = null;
 let lastAppliedTurn = 0;
 let proposalRaf = 0;
 
+// Trust-on-first-use: the first `lobby` a client ever receives establishes
+// who the GM is (nobody else can know the room code before the GM shares
+// it, so that first broadcast is always genuine). From then on, only
+// messages whose relay-verified `_from` matches get treated as coming from
+// the GM — closing off a participant forging `lobby`/`view`/`reply` to
+// rewrite someone else's board or reassign teams. Requires the relay's
+// `_from` stamping (relay/src/index.ts); see gmSendReply and handleAsPlayer.
+let trustedGmCid: string | null = null;
+
 // ---------------------------------------------------------------------------
 
 export function connect(o: ConnectOpts): void {
   opts = o;
   closedByUser = false;
   lastAppliedTurn = 0;
+  trustedGmCid = null;
 
   if (!RELAY_URL) {
     useSession.setState({
@@ -116,14 +126,19 @@ function openSocket(): void {
 
   socket.onmessage = (ev) => {
     if (typeof ev.data !== "string") return;
-    let msg: Msg;
+    let raw: Record<string, unknown>;
     try {
-      msg = JSON.parse(ev.data) as Msg;
+      raw = JSON.parse(ev.data);
     } catch {
       return;
     }
-    if (opts!.isHost) handleAsGM(msg);
-    else handleAsPlayer(msg);
+    // Relay-stamped sender cid (see relay/src/index.ts) — undefined only for
+    // the relay's own directly-injected "left" broadcast, never for anything
+    // a participant sent themselves.
+    const from = typeof raw._from === "string" ? raw._from : undefined;
+    const msg = raw as unknown as Msg;
+    if (opts!.isHost) handleAsGM(msg, from);
+    else handleAsPlayer(msg, from);
   };
 
   socket.onclose = () => {
@@ -170,8 +185,19 @@ export function setName(name: string): void {
 // GM
 // ---------------------------------------------------------------------------
 
-function handleAsGM(msg: Msg): void {
+function handleAsGM(msg: Msg, from: string | undefined): void {
   const s = useSession.getState();
+  // Every message type below carries a `cid` meaning "this is about me" —
+  // require it to match who the relay says actually sent it, so one
+  // participant can't submit moves, a note, or a submit/recall as if they
+  // were someone else. `left` is the one message the relay authors itself
+  // (webSocketClose, not webSocketMessage) — genuine ones never carry a
+  // stamp, so a stamped "left" is a participant forging one.
+  if (msg.t === "left") {
+    if (from !== undefined) return;
+  } else if (msg.t !== "lobby" && msg.t !== "view" && msg.t !== "reply") {
+    if (msg.cid !== from) return;
+  }
   switch (msg.t) {
     case "hello": {
       if (msg.cid === opts!.cid) return;
@@ -307,7 +333,18 @@ function sendView(teamId: string): void {
 // Player
 // ---------------------------------------------------------------------------
 
-function handleAsPlayer(msg: Msg): void {
+function handleAsPlayer(msg: Msg, from: string | undefined): void {
+  if (msg.t === "lobby" || msg.t === "view" || msg.t === "reply") {
+    if (trustedGmCid === null) {
+      // First authoritative message we've ever seen in this session — pin
+      // it. Nobody else could have known the room code before the GM
+      // shared it, so this is always genuinely the GM (falls back to the
+      // payload's own claim only if an old, unstamped relay is running).
+      trustedGmCid = from ?? (msg.t === "lobby" ? msg.gmCid : undefined) ?? null;
+    } else if (from !== trustedGmCid) {
+      return; // someone else in the room pretending to be the GM — ignore
+    }
+  }
   if (msg.t === "lobby") {
     const me = msg.players.find((p) => p.cid === opts!.cid);
     const myTeamId = me?.teamId ?? null;

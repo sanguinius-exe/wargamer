@@ -2,9 +2,12 @@
  * Wargamer relay — a dumb per-room WebSocket broadcaster.
  *
  * One Durable Object instance per session id holds every participant's socket
- * and forwards each message to the others verbatim. It never inspects or stores
- * game state; all sync logic (Yjs merge, presence, late-join catch-up) lives in
- * the browser (src/net.ts). Runs on Cloudflare's free plan.
+ * and forwards each message to the others, stamping a verified `_from` (the
+ * cid a socket connected with — see the duplicate-cid check below) onto each
+ * one so the client (src/net.ts) can tell who genuinely sent a message from
+ * who a message merely claims to be from. It never reads or stores game
+ * content itself; all game/turn logic lives in the browser. Runs on
+ * Cloudflare's free plan.
  */
 
 export interface Env {
@@ -47,6 +50,19 @@ export class Room {
     const url = new URL(request.url);
     const cid = url.searchParams.get("cid") ?? crypto.randomUUID();
 
+    // Refuse a second live socket claiming a cid already in use in this room.
+    // cid is how participants tell each other "who sent this" (src/net.ts
+    // trusts it to decide e.g. who the real GM is) — letting two sockets
+    // share one would let a participant forge messages as someone else. A
+    // stale socket clears within moments of really closing, so a genuine
+    // reconnect (same person, new socket) just retries — net.ts already does.
+    for (const peer of this.state.getWebSockets()) {
+      const att = peer.deserializeAttachment() as { cid?: string } | null;
+      if (att?.cid === cid) {
+        return new Response("cid already connected", { status: 409 });
+      }
+    }
+
     const pair = new WebSocketPair();
     const client = pair[0];
     const server = pair[1];
@@ -58,10 +74,29 @@ export class Room {
   }
 
   webSocketMessage(ws: WebSocket, message: ArrayBuffer | string): void {
+    // Stamp the verified sender cid (bound to this socket at connect time)
+    // onto every JSON message before forwarding, so peers can tell a message
+    // that's genuinely from someone from one that merely *claims* to be —
+    // the message body itself is otherwise untouched and unread.
+    let out: ArrayBuffer | string = message;
+    if (typeof message === "string") {
+      const att = ws.deserializeAttachment() as { cid?: string } | null;
+      if (att?.cid) {
+        try {
+          const obj = JSON.parse(message) as Record<string, unknown>;
+          if (obj && typeof obj === "object") {
+            obj._from = att.cid;
+            out = JSON.stringify(obj);
+          }
+        } catch {
+          /* not JSON; forward as-is */
+        }
+      }
+    }
     for (const peer of this.state.getWebSockets()) {
       if (peer === ws) continue;
       try {
-        peer.send(message);
+        peer.send(out);
       } catch {
         /* peer is going away */
       }

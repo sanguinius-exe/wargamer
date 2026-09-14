@@ -98,6 +98,29 @@ const clearHash = () => {
   }
 };
 
+// If the GM's own tab reloads mid-game (crash, accidental refresh, mobile
+// browser reclaiming memory), the app's normal auto-join effect re-enters
+// with a session id from the URL, which used to mean "isHost = false" — the
+// GM would silently rejoin as an observer and the whole room would go
+// headless (nobody left broadcasting lobby/view). These two sessionStorage
+// entries (scoped to this exact tab, not shared with other tabs/devices —
+// unlike localStorage) let a reload recognize "this tab created this room"
+// and resume as GM with the turn/phase/roster it last knew, instead of
+// rolling everyone back to a fresh Turn 1.
+const hostFlagKey = (id: string) => `wargamer:gmroom:${id}`;
+const gmStateKey = (id: string) => `wargamer:gmsession:${id}`;
+
+type GmResumeState = Pick<SessionStore, "turn" | "phase" | "visionKm" | "players" | "submissions">;
+
+function loadGmResumeState(id: string): Partial<GmResumeState> {
+  try {
+    const raw = sessionStorage.getItem(gmStateKey(id));
+    return raw ? (JSON.parse(raw) as Partial<GmResumeState>) : {};
+  } catch {
+    return {};
+  }
+}
+
 export const useSession = create<SessionStore>((set, get) => ({
   status: "off",
   sessionId: null,
@@ -125,7 +148,25 @@ export const useSession = create<SessionStore>((set, get) => ({
       set({ error: "Session codes are 4–12 letters/numbers." });
       return;
     }
-    const isHost = sessionId == null;
+    // A fresh "Start session as GM" click always makes you host. A reload of
+    // that same GM tab re-enters here with the room's id from the URL hash
+    // instead — recognize that case via the flag set below so it resumes as
+    // GM rather than joining its own room as a stray observer.
+    let wasHost = false;
+    try {
+      wasHost = sessionStorage.getItem(hostFlagKey(id)) === "1";
+    } catch {
+      /* ignore */
+    }
+    const isHost = sessionId == null || wasHost;
+    if (isHost) {
+      try {
+        sessionStorage.setItem(hostFlagKey(id), "1");
+      } catch {
+        /* ignore */
+      }
+    }
+    const resume = wasHost ? loadGmResumeState(id) : {};
     // Stable per-tab id so a reload reconnects to the same seat.
     const cidKey = `wargamer:cid:${id}`;
     let cid: string;
@@ -143,14 +184,15 @@ export const useSession = create<SessionStore>((set, get) => ({
       error: null,
       selfCid: cid,
       role: isHost ? "gm" : "observer",
-      players: [],
-      turn: 1,
-      phase: "planning",
+      players: resume.players ?? [],
+      turn: resume.turn ?? 1,
+      phase: resume.phase ?? "planning",
+      visionKm: resume.visionKm ?? get().visionKm,
       myTeamId: null,
       proposals: {},
       noteDraft: "",
       gmNote: null,
-      submissions: {},
+      submissions: resume.submissions ?? {},
     });
     try {
       history.replaceState(null, "", `#s=${id}`);
@@ -174,7 +216,11 @@ export const useSession = create<SessionStore>((set, get) => ({
     clearHash();
     try {
       const id = get().sessionId;
-      if (id) sessionStorage.removeItem(`wargamer:cid:${id}`);
+      if (id) {
+        sessionStorage.removeItem(`wargamer:cid:${id}`);
+        sessionStorage.removeItem(hostFlagKey(id));
+        sessionStorage.removeItem(gmStateKey(id));
+      }
     } catch {
       /* ignore */
     }
@@ -236,5 +282,28 @@ export const useSession = create<SessionStore>((set, get) => ({
   submitMoves: () => net?.playerSubmit(),
   recallMoves: () => net?.playerRecall(),
 }));
+
+// Keep a running snapshot of GM-owned session state so a reload of the GM's
+// own tab (see hostFlagKey/gmStateKey above) can resume mid-game instead of
+// rolling the whole room back to a fresh Turn 1.
+let lastGmSnapshot = "";
+useSession.subscribe((state) => {
+  if (state.role !== "gm" || !state.sessionId || state.status !== "connected") return;
+  const snapshot: GmResumeState = {
+    turn: state.turn,
+    phase: state.phase,
+    visionKm: state.visionKm,
+    players: state.players,
+    submissions: state.submissions,
+  };
+  const serialized = JSON.stringify(snapshot);
+  if (serialized === lastGmSnapshot) return;
+  lastGmSnapshot = serialized;
+  try {
+    sessionStorage.setItem(gmStateKey(state.sessionId), serialized);
+  } catch {
+    /* storage full/unavailable — the GM just resumes at Turn 1 on reload */
+  }
+});
 
 
