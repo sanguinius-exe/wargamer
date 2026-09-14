@@ -67,6 +67,8 @@ export interface BakeRequest {
 interface State {
   game: GameFile;
   selectedDivisionId: string | null;
+  /** Right-click-drag box selection on the map, for moving several at once. */
+  selectedIds: string[];
   hiddenTeamIds: string[];
   layerVisible: { imagery: boolean; reference: boolean };
   selectingTheatre: boolean;
@@ -103,6 +105,8 @@ interface State {
   moveDivision: (id: string, p: LngLat) => void;
   recallDivision: (id: string) => void;
   selectDivision: (id: string | null) => void;
+  setSelectedIds: (ids: string[]) => void;
+  moveDivisions: (moves: Record<string, LngLat>) => void;
 
   showToast: (kind: Toast["kind"], msg: string) => void;
 }
@@ -156,6 +160,7 @@ void setActiveScenario(initialGame.meta.id);
 export const useGameStore = create<State>((set, get) => ({
   game: initialGame,
   selectedDivisionId: null,
+  selectedIds: [],
   hiddenTeamIds: [],
   layerVisible: { imagery: true, reference: true },
   selectingTheatre: false,
@@ -177,6 +182,7 @@ export const useGameStore = create<State>((set, get) => ({
         divisions: [],
       },
       selectedDivisionId: null,
+      selectedIds: [],
       hiddenTeamIds: [],
       selectingTheatre: false,
       theatreDraft: null,
@@ -191,6 +197,7 @@ export const useGameStore = create<State>((set, get) => ({
       set({
         game,
         selectedDivisionId: null,
+        selectedIds: [],
         hiddenTeamIds: [],
         selectingTheatre: false,
         theatreDraft: null,
@@ -390,12 +397,23 @@ export const useGameStore = create<State>((set, get) => ({
     set((s) => ({
       game: { ...s.game, divisions: s.game.divisions.filter((d) => d.id !== id) },
       selectedDivisionId: s.selectedDivisionId === id ? null : s.selectedDivisionId,
+      selectedIds: s.selectedIds.filter((x) => x !== id),
     })),
 
   deployDivision: (id, [lng, lat]) => get().updateDivision(id, { position: { lng, lat } }),
   moveDivision: (id, [lng, lat]) => get().updateDivision(id, { position: { lng, lat } }),
+  moveDivisions: (moves) =>
+    set((s) => ({
+      game: {
+        ...s.game,
+        divisions: s.game.divisions.map((d) =>
+          moves[d.id] ? { ...d, position: { lng: moves[d.id][0], lat: moves[d.id][1] } } : d,
+        ),
+      },
+    })),
   recallDivision: (id) => get().updateDivision(id, { position: null }),
   selectDivision: (id) => set({ selectedDivisionId: id }),
+  setSelectedIds: (ids) => set({ selectedIds: ids }),
 
   showToast: (kind, msg) => {
     if (toastTimer) clearTimeout(toastTimer);

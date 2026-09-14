@@ -221,6 +221,12 @@ export default function MapView() {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map>();
   const markersRef = useRef<Map<string, maplibregl.Marker>>(new Map());
+  // Set during a group drag (started on a marker that's part of the current
+  // box selection): the dragged marker's id plus every selected marker's
+  // position at drag-start, so followers can be slid by the same delta.
+  const dragGroupRef = useRef<{ leaderId: string; starts: Map<string, [number, number]> } | null>(
+    null,
+  );
   const [ready, setReady] = useState(false);
 
   const theatre = useGameStore((s) => s.game.theatre);
@@ -228,6 +234,7 @@ export default function MapView() {
   const teams = useGameStore((s) => s.game.teams);
   const hiddenTeamIds = useGameStore((s) => s.hiddenTeamIds);
   const selectedId = useGameStore((s) => s.selectedDivisionId);
+  const selectedIds = useGameStore((s) => s.selectedIds);
   const selectingTheatre = useGameStore((s) => s.selectingTheatre);
   const layerVisible = useGameStore((s) => s.layerVisible);
   const basemapKey = useGameStore((s) => s.game.basemap?.bakedAt ?? "online");
@@ -291,11 +298,93 @@ export default function MapView() {
     map.on("click", (e) => {
       const s = useGameStore.getState();
       if (s.selectingTheatre) s.theatreClick([e.lngLat.lng, e.lngLat.lat]);
-      else s.selectDivision(null);
+      else {
+        s.selectDivision(null);
+        if (s.selectedIds.length) s.setSelectedIds([]);
+      }
     });
+
+    // --- right-click-drag box select ------------------------------------
+    // Right button drags a marquee over the map; anything draggable whose
+    // marker falls inside it becomes the group selection, which a
+    // subsequent left-drag on any one of them moves together (see
+    // dragstart/drag/dragend below). Held Shift adds to the existing
+    // selection instead of replacing it.
+    const container = containerRef.current!;
+    let boxStart: { x: number; y: number } | null = null;
+    let boxEl: HTMLDivElement | null = null;
+
+    const updateBox = (x0: number, y0: number, x1: number, y1: number) => {
+      if (!boxEl) return;
+      boxEl.style.left = `${Math.min(x0, x1)}px`;
+      boxEl.style.top = `${Math.min(y0, y1)}px`;
+      boxEl.style.width = `${Math.abs(x1 - x0)}px`;
+      boxEl.style.height = `${Math.abs(y1 - y0)}px`;
+    };
+    const onBoxMove = (e: MouseEvent) => {
+      if (!boxStart) return;
+      const rect = container.getBoundingClientRect();
+      updateBox(boxStart.x, boxStart.y, e.clientX - rect.left, e.clientY - rect.top);
+    };
+    const onBoxUp = (e: MouseEvent) => {
+      window.removeEventListener("mousemove", onBoxMove);
+      window.removeEventListener("mouseup", onBoxUp);
+      if (!boxStart) return;
+      const rect = container.getBoundingClientRect();
+      const x0 = boxStart.x;
+      const y0 = boxStart.y;
+      const x1 = e.clientX - rect.left;
+      const y1 = e.clientY - rect.top;
+      boxStart = null;
+      boxEl?.remove();
+      boxEl = null;
+
+      const minX = Math.min(x0, x1);
+      const maxX = Math.max(x0, x1);
+      const minY = Math.min(y0, y1);
+      const maxY = Math.max(y0, y1);
+      if (maxX - minX < 4 && maxY - minY < 4) return; // a plain right-click, not a drag
+
+      const hits: string[] = [];
+      for (const [id, marker] of markersRef.current) {
+        if (!marker.isDraggable()) continue;
+        const p = map.project(marker.getLngLat());
+        if (p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY) hits.push(id);
+      }
+      const s = useGameStore.getState();
+      s.setSelectedIds(e.shiftKey ? [...new Set([...s.selectedIds, ...hits])] : hits);
+    };
+    const onBoxDown = (e: MouseEvent) => {
+      if (e.button !== 2) return;
+      e.preventDefault();
+      const rect = container.getBoundingClientRect();
+      boxStart = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+      boxEl = document.createElement("div");
+      boxEl.className = "wg-selectbox";
+      container.appendChild(boxEl);
+      updateBox(boxStart.x, boxStart.y, boxStart.x, boxStart.y);
+      window.addEventListener("mousemove", onBoxMove);
+      window.addEventListener("mouseup", onBoxUp);
+    };
+    const onContextMenu = (e: MouseEvent) => e.preventDefault();
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      const s = useGameStore.getState();
+      s.selectDivision(null);
+      if (s.selectedIds.length) s.setSelectedIds([]);
+    };
+    container.addEventListener("mousedown", onBoxDown);
+    container.addEventListener("contextmenu", onContextMenu);
+    window.addEventListener("keydown", onKeyDown);
 
     return () => {
       clearInterval(readyPoll);
+      container.removeEventListener("mousedown", onBoxDown);
+      container.removeEventListener("contextmenu", onContextMenu);
+      window.removeEventListener("mousemove", onBoxMove);
+      window.removeEventListener("mouseup", onBoxUp);
+      window.removeEventListener("keydown", onKeyDown);
+      boxEl?.remove();
       map.remove();
       mapRef.current = undefined;
       markersRef.current.clear();
@@ -511,6 +600,7 @@ export default function MapView() {
     const curTeams = s.game.teams;
     const curHidden = s.hiddenTeamIds;
     const curSelected = s.selectedDivisionId;
+    const curGrouped = new Set(s.selectedIds);
     const mode = boardMode();
     const teamById = new Map(curTeams.map((t) => [t.id, t]));
     const want = new Set<string>();
@@ -546,9 +636,57 @@ export default function MapView() {
           useGameStore.getState().selectDivision(d.id);
         });
         m = new maplibregl.Marker({ element: el, draggable });
+        // If this marker is part of the current box selection, dragging it
+        // drags the whole group by the same delta (see the drag/dragend
+        // handlers below, which read this snapshot via dragGroupRef).
+        m.on("dragstart", () => {
+          const ids = useGameStore.getState().selectedIds;
+          if (ids.length > 1 && ids.includes(d.id)) {
+            const starts = new Map<string, [number, number]>();
+            for (const gid of ids) {
+              const gm = markersRef.current.get(gid);
+              if (gm) {
+                const ll = gm.getLngLat();
+                starts.set(gid, [ll.lng, ll.lat]);
+              }
+            }
+            dragGroupRef.current = { leaderId: d.id, starts };
+          } else {
+            dragGroupRef.current = null;
+          }
+        });
+        m.on("drag", () => {
+          const grp = dragGroupRef.current;
+          if (!grp || grp.leaderId !== d.id) return;
+          const start = grp.starts.get(d.id);
+          if (!start) return;
+          const now = m!.getLngLat();
+          const dLng = now.lng - start[0];
+          const dLat = now.lat - start[1];
+          for (const [gid, gstart] of grp.starts) {
+            if (gid === d.id) continue;
+            markersRef.current.get(gid)?.setLngLat([gstart[0] + dLng, gstart[1] + dLat]);
+          }
+        });
         m.on("dragend", () => {
           const ll = m!.getLngLat();
-          if (boardMode().kind === "player") {
+          const grp = dragGroupRef.current;
+          dragGroupRef.current = null;
+          const isPlayer = boardMode().kind === "player";
+          if (grp && grp.leaderId === d.id && grp.starts.size > 1) {
+            const start = grp.starts.get(d.id)!;
+            const dLng = ll.lng - start[0];
+            const dLat = ll.lat - start[1];
+            const moves: Record<string, [number, number]> = {};
+            for (const [gid, gstart] of grp.starts) {
+              moves[gid] = gid === d.id ? [ll.lng, ll.lat] : [gstart[0] + dLng, gstart[1] + dLat];
+            }
+            if (isPlayer) {
+              for (const [gid, pos] of Object.entries(moves)) useSession.getState().propose(gid, pos);
+            } else {
+              useGameStore.getState().moveDivisions(moves);
+            }
+          } else if (isPlayer) {
             useSession.getState().propose(d.id, [ll.lng, ll.lat]);
           } else {
             useGameStore.getState().moveDivision(d.id, [ll.lng, ll.lat]);
@@ -561,7 +699,7 @@ export default function MapView() {
         m.setLngLat([lng, lat]);
       }
       m.getElement().dataset.foe = isMine ? "" : "1";
-      paintMarker(m.getElement(), m, d, team, curSelected === d.id);
+      paintMarker(m.getElement(), m, d, team, curSelected === d.id, curGrouped.has(d.id));
     }
 
     for (const [id, m] of markersRef.current) {
@@ -580,6 +718,7 @@ export default function MapView() {
     teams,
     hiddenTeamIds,
     selectedId,
+    selectedIds,
     sessStatus,
     sessRole,
     sessPhase,
@@ -637,6 +776,7 @@ function paintMarker(
   d: Division,
   team: Team,
   selected: boolean,
+  grouped: boolean,
 ) {
   const r = renderSymbol(d, team, { size: MAP_SYMBOL_SIZE, detail: "icon" });
   const eff = effectiveness(d.status);
@@ -660,6 +800,7 @@ function paintMarker(
   el.dataset.ih = String(r.height);
   el.dataset.ay = String(r.anchor.y);
   el.classList.toggle("selected", selected);
+  el.classList.toggle("grouped", grouped);
   el.dataset.reserve = d.position ? "" : "1";
   marker.setOffset([0, 0]);
 }
