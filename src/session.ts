@@ -23,6 +23,8 @@ export interface Submission {
   teamId: string | null;
   moves: Record<string, { lng: number; lat: number }>;
   submitted: boolean;
+  /** a short note the player attached to this turn's proposal */
+  note?: string;
 }
 
 interface SessionStore {
@@ -43,6 +45,10 @@ interface SessionStore {
   myTeamId: string | null;
   /** player: my proposed positions this turn, keyed by division id */
   proposals: Record<string, { lng: number; lat: number }>;
+  /** player: my note to the GM this turn, editable until submitted */
+  noteDraft: string;
+  /** player: the GM's most recent reply, cleared when a new turn starts */
+  gmNote: string | null;
   /** gm: proposals received from players, keyed by their cid */
   submissions: Record<string, Submission>;
 
@@ -56,10 +62,12 @@ interface SessionStore {
   startAdjudication: () => void;
   releaseTurn: () => void;
   kick: (cid: string) => void;
+  replyToPlayer: (cid: string, text: string) => void;
 
   // player
   propose: (divId: string, lngLat: [number, number]) => void;
   clearProposal: (divId: string) => void;
+  setNoteDraft: (text: string) => void;
   submitMoves: () => void;
   recallMoves: () => void;
 }
@@ -104,6 +112,8 @@ export const useSession = create<SessionStore>((set, get) => ({
   visionKm: 7.5,
   myTeamId: null,
   proposals: {},
+  noteDraft: "",
+  gmNote: null,
   submissions: {},
 
   start: (sessionId) => {
@@ -138,6 +148,8 @@ export const useSession = create<SessionStore>((set, get) => ({
       phase: "planning",
       myTeamId: null,
       proposals: {},
+      noteDraft: "",
+      gmNote: null,
       submissions: {},
     });
     try {
@@ -175,6 +187,8 @@ export const useSession = create<SessionStore>((set, get) => ({
       gmName: "",
       myTeamId: null,
       proposals: {},
+      noteDraft: "",
+      gmNote: null,
       submissions: {},
     });
   },
@@ -198,6 +212,10 @@ export const useSession = create<SessionStore>((set, get) => ({
   startAdjudication: () => net?.gmStartAdjudication(),
   releaseTurn: () => net?.gmReleaseTurn(),
   kick: (cid) => net?.gmKick(cid),
+  replyToPlayer: (cid, text) => {
+    const clean = text.trim().slice(0, 280);
+    if (clean) net?.gmSendReply(cid, clean);
+  },
 
   propose: (divId, [lng, lat]) => {
     set((s) => ({ proposals: { ...s.proposals, [divId]: { lng, lat } } }));
@@ -209,6 +227,10 @@ export const useSession = create<SessionStore>((set, get) => ({
       delete next[divId];
       return { proposals: next };
     });
+    net?.playerSyncProposals();
+  },
+  setNoteDraft: (text) => {
+    set({ noteDraft: text.slice(0, 280) });
     net?.playerSyncProposals();
   },
   submitMoves: () => net?.playerSubmit(),

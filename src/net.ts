@@ -42,10 +42,16 @@ type Msg =
       visionKm: number;
     }
   | { t: "view"; forTeam: string; turn: number; game: GameFile }
-  | { t: "propose"; cid: string; moves: Record<string, { lng: number; lat: number }> }
+  | {
+      t: "propose";
+      cid: string;
+      moves: Record<string, { lng: number; lat: number }>;
+      note?: string;
+    }
   | { t: "submit"; cid: string }
   | { t: "unsubmit"; cid: string }
-  | { t: "reqview"; cid: string };
+  | { t: "reqview"; cid: string }
+  | { t: "reply"; cid: string; text: string };
 
 let ws: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -204,6 +210,7 @@ function handleAsGM(msg: Msg): void {
         teamId: p?.teamId ?? null,
         moves: msg.moves,
         submitted: prev?.submitted ?? false,
+        note: msg.note ?? prev?.note ?? "",
       };
       useSession.setState({ submissions: { ...s.submissions, [msg.cid]: sub } });
       break;
@@ -327,8 +334,11 @@ function handleAsPlayer(msg: Msg): void {
     if (msg.turn !== lastAppliedTurn) {
       if (lastAppliedTurn !== 0) playTurnReleased(); // not on the first view
       lastAppliedTurn = msg.turn;
-      useSession.setState({ proposals: {} });
+      useSession.setState({ proposals: {}, noteDraft: "", gmNote: null });
     }
+  } else if (msg.t === "reply") {
+    if (msg.cid !== opts!.cid) return; // addressed to someone else
+    useSession.setState({ gmNote: msg.text });
   }
 }
 
@@ -337,12 +347,14 @@ export function playerSyncProposals(): void {
   proposalRaf = requestAnimationFrame(() => {
     proposalRaf = 0;
     if (useSession.getState().phase !== "planning") return;
-    send({ t: "propose", cid: opts!.cid, moves: useSession.getState().proposals });
+    const s = useSession.getState();
+    send({ t: "propose", cid: opts!.cid, moves: s.proposals, note: s.noteDraft });
   });
 }
 
 export function playerSubmit(): void {
-  send({ t: "propose", cid: opts!.cid, moves: useSession.getState().proposals });
+  const s = useSession.getState();
+  send({ t: "propose", cid: opts!.cid, moves: s.proposals, note: s.noteDraft });
   send({ t: "submit", cid: opts!.cid });
   markSelfSubmitted(true);
 }
@@ -350,6 +362,11 @@ export function playerSubmit(): void {
 export function playerRecall(): void {
   send({ t: "unsubmit", cid: opts!.cid });
   markSelfSubmitted(false);
+}
+
+/** GM only: send a short reply to one specific player. */
+export function gmSendReply(cid: string, text: string): void {
+  send({ t: "reply", cid, text });
 }
 
 function markSelfSubmitted(v: boolean): void {

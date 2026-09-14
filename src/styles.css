@@ -519,6 +519,49 @@ textarea {
   color: var(--text);
 }
 
+/* ---------- turn notes ---------- */
+
+.wg-notefield {
+  width: 100%;
+  min-height: 44px;
+  resize: vertical;
+  font-size: 12px;
+  margin: 6px 0 0;
+}
+.wg-note {
+  font-size: 12px;
+  font-style: italic;
+  color: var(--muted);
+  margin: 4px 0 0;
+  overflow-wrap: break-word;
+}
+.wg-gmnote {
+  margin: 6px 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--panel-2);
+  border-left: 3px solid var(--accent);
+}
+.wg-gmnote .wg-subhead {
+  margin: 0 0 2px;
+}
+.wg-gmnote p {
+  margin: 0;
+  font-size: 12px;
+  overflow-wrap: break-word;
+}
+.wg-replybox {
+  display: flex;
+  gap: 4px;
+  margin: 4px 0 2px 14px;
+}
+.wg-replybox input {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  padding: 3px 6px;
+}
+
 .wg-editor-fs {
   border: 0;
   margin: 0;

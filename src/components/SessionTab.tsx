@@ -1,7 +1,7 @@
 import { useState, type CSSProperties } from "react";
-import { useSession } from "../session";
+import { useSession, type Submission } from "../session";
 import { useGameStore } from "../store";
-import { teamColor } from "../types";
+import { teamColor, type Division, type Team } from "../types";
 import { soundEnabled, setSoundEnabled } from "../sound";
 
 export default function SessionTab() {
@@ -126,6 +126,7 @@ function GmView() {
   const setVisionKm = useSession((s) => s.setVisionKm);
   const startAdjudication = useSession((s) => s.startAdjudication);
   const releaseTurn = useSession((s) => s.releaseTurn);
+  const replyToPlayer = useSession((s) => s.replyToPlayer);
 
   const teams = useGameStore((s) => s.game.teams);
   const moveDivision = useGameStore((s) => s.moveDivision);
@@ -206,48 +207,17 @@ function GmView() {
             <p className="wg-muted">No proposals were submitted.</p>
           )}
           <ul className="wg-sublist">
-            {Object.values(submissions).map((sub) => {
-              const team = teams.find((t) => t.id === sub.teamId);
-              const n = Object.keys(sub.moves).length;
-              return (
-                <li key={sub.cid}>
-                  <div className="wg-subrow">
-                    <span
-                      className="wg-dot"
-                      style={
-                        {
-                          "--c": team ? teamColor(team) : "#888",
-                        } as CSSProperties
-                      }
-                    />
-                    <span className="wg-pname">{sub.name}</span>
-                    <span className="wg-muted">
-                      {n} move{n === 1 ? "" : "s"}
-                      {sub.submitted ? " · submitted" : " · draft"}
-                    </span>
-                    <button className="wg-icon" onClick={() => applyAll(sub.cid)}>
-                      apply
-                    </button>
-                  </div>
-                  <ul className="wg-movelist">
-                    {Object.entries(sub.moves).map(([id, pos]) => {
-                      const d = divisions.find((x) => x.id === id);
-                      return (
-                        <li key={id}>
-                          <button
-                            className="wg-movebtn"
-                            onClick={() => moveDivision(id, [pos.lng, pos.lat])}
-                          >
-                            {d?.name ?? id.slice(0, 6)} →{" "}
-                            {pos.lat.toFixed(3)}, {pos.lng.toFixed(3)}
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </li>
-              );
-            })}
+            {Object.values(submissions).map((sub) => (
+              <ProposalRow
+                key={sub.cid}
+                sub={sub}
+                team={teams.find((t) => t.id === sub.teamId)}
+                divisions={divisions}
+                onApply={() => applyAll(sub.cid)}
+                onMove={moveDivision}
+                onReply={(text) => replyToPlayer(sub.cid, text)}
+              />
+            ))}
           </ul>
           <button className="primary wg-full" onClick={releaseTurn}>
             Release turn {turn} → {turn + 1}
@@ -263,6 +233,76 @@ function GmView() {
   );
 }
 
+function ProposalRow({
+  sub,
+  team,
+  divisions,
+  onApply,
+  onMove,
+  onReply,
+}: {
+  sub: Submission;
+  team: Team | undefined;
+  divisions: Division[];
+  onApply: () => void;
+  onMove: (id: string, lngLat: [number, number]) => void;
+  onReply: (text: string) => void;
+}) {
+  const [draft, setDraft] = useState("");
+  const n = Object.keys(sub.moves).length;
+
+  const send = () => {
+    const text = draft.trim();
+    if (!text) return;
+    onReply(text);
+    setDraft("");
+  };
+
+  return (
+    <li>
+      <div className="wg-subrow">
+        <span
+          className="wg-dot"
+          style={{ "--c": team ? teamColor(team) : "#888" } as CSSProperties}
+        />
+        <span className="wg-pname">{sub.name}</span>
+        <span className="wg-muted">
+          {n} move{n === 1 ? "" : "s"}
+          {sub.submitted ? " · submitted" : " · draft"}
+        </span>
+        <button className="wg-icon" onClick={onApply}>
+          apply
+        </button>
+      </div>
+      <ul className="wg-movelist">
+        {Object.entries(sub.moves).map(([id, pos]) => {
+          const d = divisions.find((x) => x.id === id);
+          return (
+            <li key={id}>
+              <button className="wg-movebtn" onClick={() => onMove(id, [pos.lng, pos.lat])}>
+                {d?.name ?? id.slice(0, 6)} → {pos.lat.toFixed(3)}, {pos.lng.toFixed(3)}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      {sub.note && <p className="wg-note">“{sub.note}”</p>}
+      <div className="wg-replybox">
+        <input
+          placeholder="Reply to this player…"
+          value={draft}
+          maxLength={280}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && send()}
+        />
+        <button className="wg-icon" disabled={!draft.trim()} onClick={send}>
+          send
+        </button>
+      </div>
+    </li>
+  );
+}
+
 /* ---------- player ---------- */
 
 function PlayerView() {
@@ -270,6 +310,9 @@ function PlayerView() {
   const phase = useSession((s) => s.phase);
   const myTeamId = useSession((s) => s.myTeamId);
   const proposals = useSession((s) => s.proposals);
+  const noteDraft = useSession((s) => s.noteDraft);
+  const setNoteDraft = useSession((s) => s.setNoteDraft);
+  const gmNote = useSession((s) => s.gmNote);
   const players = useSession((s) => s.players);
   const selfCid = useSession((s) => s.selfCid);
   const clearProposal = useSession((s) => s.clearProposal);
@@ -294,11 +337,19 @@ function PlayerView() {
         Team: <b style={{ color: team ? teamColor(team) : undefined }}>{team?.name ?? "—"}</b>
       </p>
 
+      {gmNote && (
+        <div className="wg-gmnote">
+          <span className="wg-subhead">From the GM</span>
+          <p>{gmNote}</p>
+        </div>
+      )}
+
       {phase === "adjudicating" ? (
         <p className="wg-muted">The GM is adjudicating this turn…</p>
       ) : submitted ? (
         <>
           <p className="wg-muted">Submitted — waiting for the GM.</p>
+          {noteDraft && <p className="wg-note">Your note: “{noteDraft}”</p>}
           <button className="wg-full" onClick={recallMoves}>
             Recall my moves
           </button>
@@ -325,9 +376,16 @@ function PlayerView() {
               );
             })}
           </ul>
+          <textarea
+            className="wg-notefield"
+            placeholder="Optional note to the GM this turn…"
+            value={noteDraft}
+            maxLength={280}
+            onChange={(e) => setNoteDraft(e.target.value)}
+          />
           <button
             className="primary wg-full"
-            disabled={proposed.length === 0}
+            disabled={proposed.length === 0 && !noteDraft.trim()}
             onClick={submitMoves}
           >
             Submit moves to GM
