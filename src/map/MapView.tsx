@@ -259,8 +259,17 @@ export default function MapView() {
         : { center: [30, 25] as [number, number], zoom: 2 }),
       maxZoom: STREAM_MAX_ZOOM,
       attributionControl: { compact: true },
+      // Strictly top-down, north-up: no tilt or rotation. (Right-drag is
+      // also reserved for box select, which MapLibre would otherwise use to
+      // rotate/pitch.)
+      dragRotate: false,
+      pitchWithRotate: false,
+      touchPitch: false,
+      maxPitch: 0,
     });
     mapRef.current = map;
+    map.touchZoomRotate.disableRotation();
+    map.keyboard.disableRotation();
     // A physical mouse wheel (common on Windows) fires one large discrete delta
     // per notch, which MapLibre turns into a coarse stepped zoom. Shrinking the
     // per-notch zoom rate (default 1/450) makes the eased steps blend together.
