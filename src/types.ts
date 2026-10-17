@@ -23,7 +23,22 @@ export type DivisionType =
   | "artillery"
   | "cavalry"
   | "marine"
-  | "engineer";
+  | "engineer"
+  // naval
+  | "carrier"
+  | "battleship"
+  | "cruiser"
+  | "destroyer"
+  | "frigate"
+  | "littoral"
+  | "amphibious"
+  | "mineWarfare"
+  | "patrol"
+  | "auxiliary"
+  | "submarine";
+
+/** Which 2525C battle dimension (SIDC position 3) a unit type lives in. */
+export type UnitDomain = "ground" | "sea" | "subsurface";
 
 export const FUNCTION_ID: Record<DivisionType, string> = {
   infantry: "UCI---",
@@ -35,7 +50,34 @@ export const FUNCTION_ID: Record<DivisionType, string> = {
   cavalry: "UCR---",
   marine: "UCIN--",
   engineer: "UCE---",
+  carrier: "CLCV--",
+  battleship: "CLBB--",
+  cruiser: "CLCC--",
+  destroyer: "CLDD--",
+  frigate: "CLFF--",
+  littoral: "CLLL--",
+  amphibious: "CA----",
+  mineWarfare: "CM----",
+  patrol: "CP----",
+  auxiliary: "N-----",
+  submarine: "S-----",
 };
+
+const DIMENSION_CODE: Record<UnitDomain, string> = {
+  ground: "G",
+  sea: "S",
+  subsurface: "U",
+};
+
+export function unitDomain(t: DivisionType): UnitDomain {
+  if (t === "submarine") return "subsurface";
+  return FUNCTION_ID[t].startsWith("U") ? "ground" : "sea";
+}
+
+/** Ships and submarines — no echelon, drawn in the sea frames. */
+export function isNaval(t: DivisionType): boolean {
+  return unitDomain(t) !== "ground";
+}
 
 export const TYPE_LABEL: Record<DivisionType, string> = {
   infantry: "Infantry",
@@ -47,9 +89,22 @@ export const TYPE_LABEL: Record<DivisionType, string> = {
   cavalry: "Cavalry / Recon",
   marine: "Marine / Naval Infantry",
   engineer: "Engineer",
+  carrier: "Aircraft Carrier",
+  battleship: "Battleship",
+  cruiser: "Cruiser",
+  destroyer: "Destroyer",
+  frigate: "Frigate",
+  littoral: "Littoral Combat Ship / Corvette",
+  amphibious: "Amphibious Warfare Ship",
+  mineWarfare: "Mine Warfare Vessel",
+  patrol: "Patrol Boat",
+  auxiliary: "Auxiliary / Replenishment",
+  submarine: "Submarine",
 };
 
 export const DIVISION_TYPES = Object.keys(FUNCTION_ID) as DivisionType[];
+export const GROUND_TYPES = DIVISION_TYPES.filter((t) => !isNaval(t));
+export const NAVAL_TYPES = DIVISION_TYPES.filter(isNaval);
 
 // --- echelon -> 2525C echelon code (SIDC position 12) ----------------------
 
@@ -132,6 +187,63 @@ export interface DivisionStatus {
   fatigued: boolean;
 }
 
+/**
+ * Naval condition, carried only by ships and submarines. Their readiness,
+ * supply, posture and fatigue still live in DivisionStatus; hull integrity
+ * stands in for strength, and these replace morale.
+ */
+export interface NavalStatus {
+  /** Structural condition of the hull (0-100). Low = damaged. */
+  hullPct: number;
+  /** Radar / sonar / EW suite condition (0-100). */
+  sensorPct: number;
+  /** Offensive anti-ship / land-attack missile reach. */
+  missileRangeKm: number;
+  /** Air-defence engagement envelope. */
+  airDefenseRangeKm: number;
+  /** Detection range with sensors fully working. */
+  sensorRangeKm: number;
+}
+
+type NavalRanges = Pick<NavalStatus, "missileRangeKm" | "airDefenseRangeKm" | "sensorRangeKm">;
+
+/** Rough per-class starting ranges (km); the GM tunes them per unit. */
+const NAVAL_RANGES: Partial<Record<DivisionType, NavalRanges>> = {
+  carrier: { missileRangeKm: 0, airDefenseRangeKm: 50, sensorRangeKm: 400 },
+  battleship: { missileRangeKm: 150, airDefenseRangeKm: 20, sensorRangeKm: 150 },
+  cruiser: { missileRangeKm: 300, airDefenseRangeKm: 150, sensorRangeKm: 350 },
+  destroyer: { missileRangeKm: 250, airDefenseRangeKm: 150, sensorRangeKm: 300 },
+  frigate: { missileRangeKm: 180, airDefenseRangeKm: 50, sensorRangeKm: 200 },
+  littoral: { missileRangeKm: 100, airDefenseRangeKm: 10, sensorRangeKm: 100 },
+  amphibious: { missileRangeKm: 0, airDefenseRangeKm: 30, sensorRangeKm: 150 },
+  mineWarfare: { missileRangeKm: 0, airDefenseRangeKm: 5, sensorRangeKm: 40 },
+  patrol: { missileRangeKm: 40, airDefenseRangeKm: 5, sensorRangeKm: 40 },
+  auxiliary: { missileRangeKm: 0, airDefenseRangeKm: 5, sensorRangeKm: 60 },
+  submarine: { missileRangeKm: 250, airDefenseRangeKm: 0, sensorRangeKm: 100 },
+};
+
+export function defaultNaval(t: DivisionType): NavalStatus {
+  return {
+    hullPct: 100,
+    sensorPct: 100,
+    ...(NAVAL_RANGES[t] ?? NAVAL_RANGES.destroyer!),
+  };
+}
+
+/** Detection range actually achieved, scaled by sensor integrity (metres). */
+export function effectiveSensorM(n: NavalStatus): number {
+  return n.sensorRangeKm * 1000 * (n.sensorPct / 100);
+}
+
+export type RangeKind = "missile" | "airDefense" | "sensor";
+
+/** Map ring colours for each naval range kind. */
+export const RANGE_COLOR: Record<RangeKind, string> = {
+  missile: "#ff9f43",
+  airDefense: "#4dd0e1",
+  sensor: "#e6edf3",
+};
+
 export type Reinforced = "reinforced" | "reduced" | "reinforcedReduced" | null;
 
 export interface Division {
@@ -149,6 +261,8 @@ export interface Division {
   /** Map location, or null when the unit is held off-map in reserve. */
   position: { lng: number; lat: number } | null;
   status: DivisionStatus;
+  /** Present on naval units; null for ground units. */
+  naval: NavalStatus | null;
   notes: string;
 }
 
@@ -238,13 +352,24 @@ export function defaultStatus(): DivisionStatus {
   };
 }
 
+/** Strength for ground units, hull integrity for naval ones (0-100). */
+export function conditionPct(d: Division): number {
+  return isNaval(d.type) && d.naval ? d.naval.hullPct : d.status.strengthPct;
+}
+
 /** Overall combat effectiveness, a weighted blend (0-100). */
-export function effectiveness(s: DivisionStatus): number {
+export function effectiveness(d: Division): number {
+  const s = d.status;
   const raw =
-    0.4 * s.strengthPct +
-    0.25 * s.readinessPct +
-    0.2 * s.supplyPct +
-    0.15 * s.moralePct;
+    isNaval(d.type) && d.naval
+      ? 0.4 * d.naval.hullPct +
+        0.2 * d.naval.sensorPct +
+        0.2 * s.readinessPct +
+        0.2 * s.supplyPct
+      : 0.4 * s.strengthPct +
+        0.25 * s.readinessPct +
+        0.2 * s.supplyPct +
+        0.15 * s.moralePct;
   return Math.max(0, Math.min(100, Math.round(raw - (s.fatigued ? 8 : 0))));
 }
 
@@ -256,26 +381,34 @@ export function effColor(pct: number): string {
 
 /**
  * Assemble a 15-character 2525C SIDC from a division + its side's identity.
- * Position 4 (status) encodes operational condition from strength, so a
+ * Position 4 (status) encodes operational condition from strength (hull
+ * integrity for naval units), so a
  * degraded unit shows the standard damaged / destroyed bar.
  */
 export function buildSIDC(d: Division, identity: Identity): string {
   const affil = AFFILIATION_CODE[identity];
-  const status =
-    d.status.strengthPct <= 30 ? "X" : d.status.strengthPct <= 60 ? "D" : "C";
+  const naval = isNaval(d.type);
+  const dim = DIMENSION_CODE[unitDomain(d.type)];
+  const cond = conditionPct(d);
+  const status = cond <= 30 ? "X" : cond <= 60 ? "D" : "C";
   const func = FUNCTION_ID[d.type]; // 6 chars
   const mod1 =
     d.isHQ && d.isTaskForce ? "B" : d.isHQ ? "A" : d.isTaskForce ? "E" : "-";
-  const ech = ECHELON_CODE[d.echelon]; // 1 char
-  return `S${affil}G${status}${func}${mod1}${ech}---`;
+  // Echelon is a land-unit amplifier; ships and boats leave it blank.
+  const ech = naval ? "-" : ECHELON_CODE[d.echelon]; // 1 char
+  return `S${affil}${dim}${status}${func}${mod1}${ech}---`;
 }
 
-export function makeDivision(teamId: string, name: string): Division {
+export function makeDivision(
+  teamId: string,
+  name: string,
+  type: DivisionType = "infantry",
+): Division {
   return {
     id: uid(),
     teamId,
     name,
-    type: "infantry",
+    type,
     echelon: "division",
     higherFormation: "",
     isHQ: false,
@@ -283,6 +416,7 @@ export function makeDivision(teamId: string, name: string): Division {
     reinforced: null,
     position: null,
     status: defaultStatus(),
+    naval: isNaval(type) ? defaultNaval(type) : null,
     notes: "",
   };
 }

@@ -10,6 +10,10 @@ import {
   effectiveness,
   effColor,
   teamColor,
+  isNaval,
+  effectiveSensorM,
+  RANGE_COLOR,
+  RangeKind,
 } from "../types";
 import { renderSymbol } from "../symbols";
 import { IMAGERY_URL, IMAGERY_ATTRIB, REFERENCE_ATTRIB } from "../tiles/bake";
@@ -51,6 +55,29 @@ const NATURAL_FRAME_PX = 36; // ~ rendered frame width at that base size
 const TARGET_GROUND_M = 1500; // reference ground width the icon tracks
 const MARKER_MIN_SCALE = 0.5; // never smaller than ~18 px
 const MARKER_MAX_SCALE = 1.45; // never larger than ~52 px (~½ km around z13)
+
+/** A geodesic circle of radiusM around a point, as a GeoJSON ring. */
+function circleRing(lng: number, lat: number, radiusM: number, steps = 96): number[][] {
+  const R = 6371008.8;
+  const d = radiusM / R;
+  const la1 = (lat * Math.PI) / 180;
+  const lo1 = (lng * Math.PI) / 180;
+  const ring: number[][] = [];
+  for (let i = 0; i <= steps; i++) {
+    const brg = (2 * Math.PI * i) / steps;
+    const la2 = Math.asin(
+      Math.sin(la1) * Math.cos(d) + Math.cos(la1) * Math.sin(d) * Math.cos(brg),
+    );
+    const lo2 =
+      lo1 +
+      Math.atan2(
+        Math.sin(brg) * Math.sin(d) * Math.cos(la1),
+        Math.cos(d) - Math.sin(la1) * Math.sin(la2),
+      );
+    ring.push([(lo2 * 180) / Math.PI, (la2 * 180) / Math.PI]);
+  }
+  return ring;
+}
 
 function metresPerPixel(lat: number, zoom: number): number {
   return (156543.03392804097 * Math.cos((lat * Math.PI) / 180)) / 2 ** zoom;
@@ -237,6 +264,7 @@ export default function MapView() {
   const selectedIds = useGameStore((s) => s.selectedIds);
   const selectingTheatre = useGameStore((s) => s.selectingTheatre);
   const layerVisible = useGameStore((s) => s.layerVisible);
+  const rangeVisible = useGameStore((s) => s.rangeVisible);
   const basemapKey = useGameStore((s) => s.game.basemap?.bakedAt ?? "online");
   const tileEpoch = useGameStore((s) => s.tileEpoch);
 
@@ -420,6 +448,7 @@ export default function MapView() {
         ensureOverlay(map);
         syncTheatre();
         syncMarkers();
+        syncRanges();
       });
     }
     styleKeyRef.current = key;
@@ -486,6 +515,46 @@ export default function MapView() {
         source: "theatre-outline",
         paint: { "line-color": "#f2b134", "line-width": 2, "line-dasharray": [3, 1.5] },
       });
+    }
+    if (!map.getSource("wg-ranges")) {
+      // Naval weapon / sensor rings, faint so they never hide the imagery.
+      const before = map.getLayer("wg-plan-lines") ? "wg-plan-lines" : undefined;
+      map.addSource("wg-ranges", { type: "geojson", data: EMPTY_FC });
+      map.addLayer(
+        {
+          id: "wg-ranges-fill",
+          type: "fill",
+          source: "wg-ranges",
+          filter: ["!=", ["get", "kind"], "sensor"],
+          paint: { "fill-color": ["get", "color"], "fill-opacity": 0.08 },
+        },
+        before,
+      );
+      map.addLayer(
+        {
+          id: "wg-ranges-line",
+          type: "line",
+          source: "wg-ranges",
+          filter: ["!=", ["get", "kind"], "sensor"],
+          paint: { "line-color": ["get", "color"], "line-width": 1.5, "line-opacity": 0.55 },
+        },
+        before,
+      );
+      map.addLayer(
+        {
+          id: "wg-ranges-sensor",
+          type: "line",
+          source: "wg-ranges",
+          filter: ["==", ["get", "kind"], "sensor"],
+          paint: {
+            "line-color": ["get", "color"],
+            "line-width": 1.25,
+            "line-opacity": 0.45,
+            "line-dasharray": [1, 2],
+          },
+        },
+        before,
+      );
     }
     if (!map.getSource("wg-plan-lines")) {
       map.addSource("wg-plan-lines", { type: "geojson", data: EMPTY_FC });
@@ -574,6 +643,53 @@ export default function MapView() {
       features: targets,
     });
   }
+
+  function syncRanges() {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    ensureOverlay(map);
+    const s = useGameStore.getState();
+    const show = s.rangeVisible;
+    const mode = boardMode();
+    const features: FC["features"] = [];
+    for (const d of s.game.divisions) {
+      if (!d.position || !d.naval || !isNaval(d.type)) continue;
+      if (s.hiddenTeamIds.includes(d.teamId)) continue;
+      // Rings follow the marker, which sits on a player's proposed spot.
+      const p =
+        mode.kind === "player" && d.teamId === mode.myTeamId
+          ? (mode.proposals[d.id] ?? d.position)
+          : d.position;
+      const radii: [RangeKind, number][] = [
+        ["missile", d.naval.missileRangeKm * 1000],
+        ["airDefense", d.naval.airDefenseRangeKm * 1000],
+        ["sensor", effectiveSensorM(d.naval)],
+      ];
+      for (const [kind, r] of radii) {
+        if (!show[kind] || r <= 0) continue;
+        features.push({
+          type: "Feature",
+          properties: { kind, color: RANGE_COLOR[kind] },
+          geometry: { type: "Polygon", coordinates: [circleRing(p.lng, p.lat, r)] },
+        });
+      }
+    }
+    (map.getSource("wg-ranges") as maplibregl.GeoJSONSource | undefined)?.setData({
+      type: "FeatureCollection",
+      features,
+    });
+  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(syncRanges, [
+    ready,
+    divisions,
+    hiddenTeamIds,
+    rangeVisible,
+    sessStatus,
+    sessRole,
+    myTeamId,
+    proposals,
+  ]);
 
   function syncTheatre() {
     const map = mapRef.current;
@@ -788,7 +904,7 @@ function paintMarker(
   grouped: boolean,
 ) {
   const r = renderSymbol(d, team, { size: MAP_SYMBOL_SIZE, detail: "icon" });
-  const eff = effectiveness(d.status);
+  const eff = effectiveness(d);
   el.innerHTML =
     `<div class="wg-mk-inner">${r.svg}</div>` +
     `<div class="wg-mk-label"><span class="nm"></span><span class="ef"></span></div>`;

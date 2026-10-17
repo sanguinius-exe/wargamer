@@ -5,6 +5,8 @@ import {
   Identity,
   SCHEMA_VERSION,
   defaultStatus,
+  defaultNaval,
+  isNaval,
   uid,
 } from "./types";
 
@@ -43,6 +45,9 @@ export function normalizeGame(obj: unknown): GameFile {
     isTaskForce: d.isTaskForce ?? false,
     reinforced: d.reinforced ?? null,
     status: { ...defaultStatus(), ...d.status },
+    naval: isNaval(d.type)
+      ? { ...defaultNaval(d.type), ...d.naval }
+      : (d.naval ?? null),
   }));
 
   return raw as unknown as GameFile;
@@ -77,6 +82,7 @@ function migrateV1(v1: Record<string, unknown>): GameFile {
       reinforced: null,
       position: (d.position as Division["position"]) ?? null,
       status: { ...defaultStatus(), ...(d.status as object) },
+      naval: null,
       notes: String(d.notes ?? ""),
     };
   });

@@ -285,6 +285,10 @@ textarea {
 .wg-add:hover {
   color: var(--text);
 }
+.wg-add-row {
+  display: flex;
+  gap: 6px;
+}
 .wg-add-team {
   margin-top: 4px;
 }
@@ -647,6 +651,35 @@ textarea {
   flex-direction: column;
   gap: 10px;
   margin-bottom: 12px;
+}
+.wg-range-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid;
+  margin-right: 2px;
+}
+.wg-range-swatch[data-kind="sensor"] {
+  border-style: dotted;
+}
+.wg-ranges {
+  margin-top: 14px;
+}
+.wg-ranges-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+.wg-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: 11px;
+  color: var(--accent);
+  cursor: pointer;
 }
 .wg-meter-top {
   display: flex;

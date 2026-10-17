@@ -3,15 +3,19 @@ import {
   GameFile,
   Division,
   DivisionStatus,
+  NavalStatus,
+  defaultNaval,
   Team,
   Identity,
   SCHEMA_VERSION,
   makeSampleGame,
   makeDivision,
   makeTeam,
+  isNaval,
   slug,
   uid,
   TEAM_PALETTE,
+  RangeKind,
 } from "./types";
 import { normalizeGame } from "./schema";
 import {
@@ -43,6 +47,7 @@ export interface DeepDivisionPatch {
   reinforced?: Division["reinforced"];
   position?: Division["position"];
   status?: Partial<DivisionStatus>;
+  naval?: Partial<NavalStatus>;
 }
 
 interface Toast {
@@ -71,6 +76,8 @@ interface State {
   selectedIds: string[];
   hiddenTeamIds: string[];
   layerVisible: { imagery: boolean; reference: boolean };
+  /** Which naval range rings to draw on the map. */
+  rangeVisible: Record<RangeKind, boolean>;
   selectingTheatre: boolean;
   theatreDraft: LngLat | null;
   toast: Toast | null;
@@ -89,6 +96,7 @@ interface State {
   theatreClick: (p: LngLat) => void;
 
   setLayerVisible: (layer: "imagery" | "reference", on: boolean) => void;
+  setRangeVisible: (kind: RangeKind, on: boolean) => void;
   runBake: (req: BakeRequest) => Promise<void>;
   cancelBake: () => void;
   clearBasemap: () => Promise<void>;
@@ -98,7 +106,7 @@ interface State {
   removeTeam: (id: string) => void;
   toggleTeamHidden: (id: string) => void;
 
-  addDivision: (teamId: string) => void;
+  addDivision: (teamId: string, naval?: boolean) => void;
   updateDivision: (id: string, patch: DeepDivisionPatch) => void;
   removeDivision: (id: string) => void;
   deployDivision: (id: string, p: LngLat) => void;
@@ -122,10 +130,15 @@ function loadAutosave(): GameFile | null {
 }
 
 function mergeDivision(d: Division, p: DeepDivisionPatch): Division {
+  const type = p.type ?? d.type;
+  // A unit switched to a naval class picks up that class's defaults; one
+  // switched back to ground keeps its old naval stats, harmlessly unused.
+  let naval = d.naval ?? (isNaval(type) ? defaultNaval(type) : null);
+  if (p.naval) naval = { ...(naval ?? defaultNaval(type)), ...p.naval };
   return {
     ...d,
     name: p.name ?? d.name,
-    type: p.type ?? d.type,
+    type,
     echelon: p.echelon ?? d.echelon,
     teamId: p.teamId ?? d.teamId,
     notes: p.notes ?? d.notes,
@@ -135,6 +148,7 @@ function mergeDivision(d: Division, p: DeepDivisionPatch): Division {
     reinforced: "reinforced" in p ? p.reinforced! : d.reinforced,
     position: "position" in p ? p.position! : d.position,
     status: p.status ? { ...d.status, ...p.status } : d.status,
+    naval,
   };
 }
 
@@ -163,6 +177,7 @@ export const useGameStore = create<State>((set, get) => ({
   selectedIds: [],
   hiddenTeamIds: [],
   layerVisible: { imagery: true, reference: true },
+  rangeVisible: { missile: true, airDefense: true, sensor: true },
   selectingTheatre: false,
   theatreDraft: null,
   toast: null,
@@ -257,6 +272,8 @@ export const useGameStore = create<State>((set, get) => ({
 
   setLayerVisible: (layer, on) =>
     set((s) => ({ layerVisible: { ...s.layerVisible, [layer]: on } })),
+  setRangeVisible: (kind, on) =>
+    set((s) => ({ rangeVisible: { ...s.rangeVisible, [kind]: on } })),
 
   runBake: async (req) => {
     if (get().bake?.running) return;
@@ -373,10 +390,15 @@ export const useGameStore = create<State>((set, get) => ({
         : [...s.hiddenTeamIds, id],
     })),
 
-  addDivision: (teamId) =>
+  addDivision: (teamId, naval = false) =>
     set((s) => {
-      const n = s.game.divisions.filter((d) => d.teamId === teamId).length + 1;
-      const d = makeDivision(teamId, `${ordinal(n)} Division`);
+      const n =
+        s.game.divisions.filter(
+          (d) => d.teamId === teamId && isNaval(d.type) === naval,
+        ).length + 1;
+      const d = naval
+        ? makeDivision(teamId, `${ordinal(n)} Surface Group`, "destroyer")
+        : makeDivision(teamId, `${ordinal(n)} Division`);
       return {
         game: { ...s.game, divisions: [...s.game.divisions, d] },
         selectedDivisionId: d.id,

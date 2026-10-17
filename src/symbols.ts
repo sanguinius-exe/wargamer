@@ -40,7 +40,7 @@ export function renderSymbol(
   const size = opts.size ?? 34;
   const detail = opts.detail ?? "full";
   const sidc = buildSIDC(d, team.identity);
-  const eff = effectiveness(d.status);
+  const eff = effectiveness(d);
   const color = teamColor(team);
 
   const key = [

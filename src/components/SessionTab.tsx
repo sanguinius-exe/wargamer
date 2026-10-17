@@ -161,6 +161,10 @@ function GmView() {
           onChange={(e) => setVisionKm(Number(e.target.value))}
         />
       </label>
+      <p className="wg-tip">
+        Naval units see out to their sensor range (scaled by sensor integrity)
+        when that is farther.
+      </p>
 
       <h3 className="wg-subhead">Players</h3>
       {players.length === 0 && <p className="wg-muted">No one has joined yet.</p>}

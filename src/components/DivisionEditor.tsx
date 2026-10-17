@@ -2,7 +2,9 @@ import { useMemo } from "react";
 import { useGameStore } from "../store";
 import { useSession } from "../session";
 import {
-  DIVISION_TYPES,
+  GROUND_TYPES,
+  NAVAL_TYPES,
+  isNaval,
   ECHELONS,
   POSTURES,
   TYPE_LABEL,
@@ -10,17 +12,39 @@ import {
   effectiveness,
   effColor,
   DivisionStatus,
+  NavalStatus,
   Reinforced,
+  defaultNaval,
 } from "../types";
 import { renderSymbol, describeSymbol } from "../symbols";
 
-type MeterKey = "strengthPct" | "readinessPct" | "supplyPct" | "moralePct";
+type StatusKey = "strengthPct" | "readinessPct" | "supplyPct" | "moralePct";
+type NavalPctKey = "hullPct" | "sensorPct";
+type RangeKey = "missileRangeKm" | "airDefenseRangeKm" | "sensorRangeKm";
 
-const METERS: { key: MeterKey; label: string; hint: string }[] = [
-  { key: "strengthPct", label: "Strength", hint: "Manpower & equipment vs. full establishment" },
-  { key: "readinessPct", label: "Readiness", hint: "Training, cohesion, command & control" },
-  { key: "supplyPct", label: "Supply", hint: "Fuel, ammunition, spares on hand" },
-  { key: "moralePct", label: "Morale", hint: "Will to fight" },
+/** A 0-100 slider, stored either on `status` or on `naval`. */
+type Meter =
+  | { src: "status"; key: StatusKey; label: string; hint: string }
+  | { src: "naval"; key: NavalPctKey; label: string; hint: string };
+
+const GROUND_METERS: Meter[] = [
+  { src: "status", key: "strengthPct", label: "Strength", hint: "Manpower & equipment vs. full establishment" },
+  { src: "status", key: "readinessPct", label: "Readiness", hint: "Training, cohesion, command & control" },
+  { src: "status", key: "supplyPct", label: "Supply", hint: "Fuel, ammunition, spares on hand" },
+  { src: "status", key: "moralePct", label: "Morale", hint: "Will to fight" },
+];
+
+const NAVAL_METERS: Meter[] = [
+  { src: "naval", key: "hullPct", label: "Hull integrity", hint: "Structural condition of the hull" },
+  { src: "naval", key: "sensorPct", label: "Sensor integrity", hint: "Radar, sonar & EW suite condition" },
+  { src: "status", key: "readinessPct", label: "Readiness", hint: "Crew training, damage control, C2" },
+  { src: "status", key: "supplyPct", label: "Supply", hint: "Fuel, missiles & munitions on hand" },
+];
+
+const RANGES: { key: RangeKey; label: string; hint: string }[] = [
+  { key: "missileRangeKm", label: "Missile range", hint: "Anti-ship / land-attack missile reach" },
+  { key: "airDefenseRangeKm", label: "Air defense range", hint: "Air-defence engagement envelope" },
+  { key: "sensorRangeKm", label: "Sensor range", hint: "Detection range with sensors fully working" },
 ];
 
 const REINFORCED_OPTS: { value: string; label: string }[] = [
@@ -50,7 +74,10 @@ export default function DivisionEditor() {
   );
 
   if (!d || !team) return null;
-  const eff = effectiveness(d.status);
+  const eff = effectiveness(d);
+  const naval = isNaval(d.type);
+  const nv = d.naval ?? defaultNaval(d.type);
+  const meters = naval ? NAVAL_METERS : GROUND_METERS;
 
   return (
     <aside className="wg-editor">
@@ -89,30 +116,41 @@ export default function DivisionEditor() {
             ))}
           </select>
         </label>
+        {!naval && (
+          <label>
+            Echelon
+            <select
+              value={d.echelon}
+              onChange={(e) => update(id, { echelon: e.target.value as typeof d.echelon })}
+            >
+              {ECHELONS.map((x) => (
+                <option key={x} value={x}>
+                  {x} ({ECHELON_SYMBOL[x]})
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <label>
-          Echelon
-          <select
-            value={d.echelon}
-            onChange={(e) => update(id, { echelon: e.target.value as typeof d.echelon })}
-          >
-            {ECHELONS.map((x) => (
-              <option key={x} value={x}>
-                {x} ({ECHELON_SYMBOL[x]})
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Branch
+          {naval ? "Class" : "Branch"}
           <select
             value={d.type}
             onChange={(e) => update(id, { type: e.target.value as typeof d.type })}
           >
-            {DIVISION_TYPES.map((x) => (
-              <option key={x} value={x}>
-                {TYPE_LABEL[x]}
-              </option>
-            ))}
+            <optgroup label="Ground">
+              {GROUND_TYPES.map((x) => (
+                <option key={x} value={x}>
+                  {TYPE_LABEL[x]}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="Naval">
+              {NAVAL_TYPES.map((x) => (
+                <option key={x} value={x}>
+                  {TYPE_LABEL[x]}
+                </option>
+              ))}
+            </optgroup>
           </select>
         </label>
         <label>
@@ -134,7 +172,7 @@ export default function DivisionEditor() {
           Higher formation
           <input
             value={d.higherFormation}
-            placeholder="e.g. III Corps"
+            placeholder={naval ? "e.g. Carrier Strike Group 2" : "e.g. III Corps"}
             onChange={(e) => update(id, { higherFormation: e.target.value })}
           />
         </label>
@@ -181,8 +219,8 @@ export default function DivisionEditor() {
       </div>
 
       <div className="wg-meters">
-        {METERS.map((m) => {
-          const val = d.status[m.key];
+        {meters.map((m) => {
+          const val = m.src === "naval" ? nv[m.key] : d.status[m.key];
           return (
             <div className="wg-meter" key={m.key}>
               <div className="wg-meter-top">
@@ -194,16 +232,70 @@ export default function DivisionEditor() {
                 min={0}
                 max={100}
                 value={val}
-                onChange={(e) =>
-                  update(id, {
-                    status: { [m.key]: Number(e.target.value) } as Partial<DivisionStatus>,
-                  })
-                }
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  update(
+                    id,
+                    m.src === "naval"
+                      ? { naval: { [m.key]: v } as Partial<NavalStatus> }
+                      : { status: { [m.key]: v } as Partial<DivisionStatus> },
+                  );
+                }}
               />
             </div>
           );
         })}
       </div>
+
+      {naval && (
+        <div className="wg-ranges">
+          <div className="wg-ranges-head">
+            <span>Weapon & sensor ranges</span>
+            <button
+              type="button"
+              className="wg-link"
+              title="Reset ranges to this class's defaults"
+              onClick={() => {
+                const def = defaultNaval(d.type);
+                update(id, {
+                  naval: {
+                    missileRangeKm: def.missileRangeKm,
+                    airDefenseRangeKm: def.airDefenseRangeKm,
+                    sensorRangeKm: def.sensorRangeKm,
+                  },
+                });
+              }}
+            >
+              Class defaults
+            </button>
+          </div>
+          <div className="wg-field-grid">
+            {RANGES.map((r) => (
+              <label key={r.key} title={r.hint}>
+                {r.label} (km)
+                <input
+                  type="number"
+                  min={0}
+                  step={5}
+                  value={nv[r.key]}
+                  onChange={(e) =>
+                    update(id, {
+                      naval: { [r.key]: Math.max(0, Number(e.target.value) || 0) },
+                    })
+                  }
+                />
+              </label>
+            ))}
+          </div>
+          {nv.sensorPct < 100 && (
+            <p className="wg-tip">
+              Effective sensor range ≈{" "}
+              {Math.round((nv.sensorRangeKm * nv.sensorPct) / 100)} km at{" "}
+              {nv.sensorPct}% integrity.
+            </p>
+          )}
+        </div>
+      )}
 
       <label className="wg-field-full">
         Unit notes
@@ -222,7 +314,7 @@ export default function DivisionEditor() {
               if (confirm(`Delete ${d.name}?`)) remove(id);
             }}
           >
-            Delete division
+            {naval ? "Delete unit" : "Delete division"}
           </button>
         </div>
       </fieldset>

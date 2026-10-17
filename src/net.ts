@@ -1,4 +1,10 @@
-import { GameFile, Division, SCHEMA_VERSION } from "./types";
+import {
+  GameFile,
+  Division,
+  SCHEMA_VERSION,
+  isNaval,
+  effectiveSensorM,
+} from "./types";
 import { useGameStore, setAutosavePaused } from "./store";
 import { useSession, PlayerInfo, Submission } from "./session";
 import { setActiveScenario } from "./tiles/tileStore";
@@ -444,7 +450,11 @@ function haversineM(
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
-/** Fog of war: your divisions + enemy divisions within visionM of any of them. */
+/**
+ * Fog of war: your divisions + enemy divisions within sight of any of them.
+ * Ground units see visionM; naval units see their effective sensor range
+ * (scaled by sensor integrity), never less than visionM.
+ */
 export function filterGameForTeam(
   game: GameFile,
   teamId: string,
@@ -456,9 +466,17 @@ export function filterGameForTeam(
     if (d.teamId === teamId) mine.push(d);
     else if (d.position) enemyOnMap.push(d);
   }
-  const eyes = mine.filter((d) => d.position).map((d) => d.position!);
+  const eyes = mine
+    .filter((d) => d.position)
+    .map((d) => ({
+      at: d.position!,
+      rangeM:
+        isNaval(d.type) && d.naval
+          ? Math.max(visionM, effectiveSensorM(d.naval))
+          : visionM,
+    }));
   const visibleEnemies = enemyOnMap.filter((e) =>
-    eyes.some((eye) => haversineM(eye, e.position!) <= visionM),
+    eyes.some((eye) => haversineM(eye.at, e.position!) <= eye.rangeM),
   );
   return { ...game, divisions: [...mine, ...visibleEnemies] };
 }

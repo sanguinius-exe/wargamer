@@ -8,13 +8,22 @@ import {
   teamColor,
   ECHELON_SYMBOL,
   TYPE_LABEL,
+  isNaval,
   effectiveness,
   effColor,
+  RANGE_COLOR,
+  RangeKind,
 } from "../types";
 import { renderSymbol } from "../symbols";
 import { countTilesForBounds } from "../tiles/tileMath";
 import { useSession } from "../session";
 import SessionTab from "./SessionTab";
+
+const RANGE_TOGGLES: { kind: RangeKind; label: string }[] = [
+  { kind: "missile", label: "Missile range" },
+  { kind: "airDefense", label: "Air defense range" },
+  { kind: "sensor", label: "Sensor range" },
+];
 
 const IDENTITIES: Identity[] = ["friend", "hostile", "neutral", "unknown", "pending"];
 
@@ -76,6 +85,8 @@ function ScenarioTab({ restricted }: { restricted: boolean }) {
   const clearTheatre = useGameStore((s) => s.clearTheatre);
   const selectingTheatre = useGameStore((s) => s.selectingTheatre);
   const setLayerVisible = useGameStore((s) => s.setLayerVisible);
+  const rangeVisible = useGameStore((s) => s.rangeVisible);
+  const setRangeVisible = useGameStore((s) => s.setRangeVisible);
   const runBake = useGameStore((s) => s.runBake);
   const cancelBake = useGameStore((s) => s.cancelBake);
   const clearBasemap = useGameStore((s) => s.clearBasemap);
@@ -237,6 +248,18 @@ function ScenarioTab({ restricted }: { restricted: boolean }) {
           />
           Roads &amp; labels
         </label>
+        <h3 className="wg-subhead">Naval ranges</h3>
+        {RANGE_TOGGLES.map((r) => (
+          <label className="wg-check" key={r.kind}>
+            <input
+              type="checkbox"
+              checked={rangeVisible[r.kind]}
+              onChange={(e) => setRangeVisible(r.kind, e.target.checked)}
+            />
+            <span className="wg-range-swatch" data-kind={r.kind} style={{ borderColor: RANGE_COLOR[r.kind] }} />
+            {r.label}
+          </label>
+        ))}
       </section>
 
       <section className="wg-panel">
@@ -341,9 +364,14 @@ function ScenarioTab({ restricted }: { restricted: boolean }) {
               </ul>
 
               {!restricted && (
-                <button className="wg-add" onClick={() => addDivision(team.id)}>
-                  + Add division
-                </button>
+                <div className="wg-add-row">
+                  <button className="wg-add" onClick={() => addDivision(team.id)}>
+                    + Add division
+                  </button>
+                  <button className="wg-add" onClick={() => addDivision(team.id, true)}>
+                    + Add naval unit
+                  </button>
+                </div>
               )}
             </div>
           );
@@ -390,7 +418,7 @@ function RosterRow({
   onSelect: () => void;
   onRecall: () => void;
 }) {
-  const eff = effectiveness(d.status);
+  const eff = effectiveness(d);
   const svg = useMemo(
     () => renderSymbol(d, team, { size: 20, detail: "none" }).svg,
     [d, team],
@@ -407,7 +435,11 @@ function RosterRow({
       onClick={onSelect}
     >
       <span className="wg-roster-sym" dangerouslySetInnerHTML={{ __html: svg }} />
-      <span className="wg-roster-name" title={`${ECHELON_SYMBOL[d.echelon]} · ${TYPE_LABEL[d.type]}`}>
+      <span className="wg-roster-name" title={
+          isNaval(d.type)
+            ? TYPE_LABEL[d.type]
+            : `${ECHELON_SYMBOL[d.echelon]} · ${TYPE_LABEL[d.type]}`
+        }>
         {d.name}
       </span>
       <span className="wg-roster-eff" style={{ color: effColor(eff) }}>
