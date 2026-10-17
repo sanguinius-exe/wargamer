@@ -27,7 +27,8 @@ export type DivisionType =
   // naval
   | "carrier"
   | "battleship"
-  | "cruiser"
+  | "heavyCruiser"
+  | "lightCruiser"
   | "destroyer"
   | "frigate"
   | "littoral"
@@ -52,7 +53,8 @@ export const FUNCTION_ID: Record<DivisionType, string> = {
   engineer: "UCE---",
   carrier: "CLCV--",
   battleship: "CLBB--",
-  cruiser: "CLCC--",
+  heavyCruiser: "CLCC--",
+  lightCruiser: "CLCC--",
   destroyer: "CLDD--",
   frigate: "CLFF--",
   littoral: "CLLL--",
@@ -89,9 +91,10 @@ export const TYPE_LABEL: Record<DivisionType, string> = {
   cavalry: "Cavalry / Recon",
   marine: "Marine / Naval Infantry",
   engineer: "Engineer",
-  carrier: "Aircraft Carrier",
+  carrier: "Aircraft Carrier (CV)",
   battleship: "Battleship",
-  cruiser: "Cruiser",
+  heavyCruiser: "Heavy Cruiser (CA)",
+  lightCruiser: "Light Cruiser (CL)",
   destroyer: "Destroyer",
   frigate: "Frigate",
   littoral: "Littoral Combat Ship / Corvette",
@@ -100,6 +103,18 @@ export const TYPE_LABEL: Record<DivisionType, string> = {
   patrol: "Patrol Boat",
   auxiliary: "Auxiliary / Replenishment",
   submarine: "Submarine",
+};
+
+/**
+ * Hull classification drawn inside the ship frame in place of milsymbol's
+ * own label. 2525C has one cruiser code (it labels "CC") and draws the
+ * carrier as a bare glyph, so these classes reuse the cruiser symbol with
+ * their own letters.
+ */
+export const HULL_LABEL: Partial<Record<DivisionType, string>> = {
+  carrier: "CV",
+  heavyCruiser: "CA",
+  lightCruiser: "CL",
 };
 
 export const DIVISION_TYPES = Object.keys(FUNCTION_ID) as DivisionType[];
@@ -209,17 +224,18 @@ type NavalRanges = Pick<NavalStatus, "missileRangeKm" | "airDefenseRangeKm" | "s
 
 /** Rough per-class starting ranges (km); the GM tunes them per unit. */
 const NAVAL_RANGES: Partial<Record<DivisionType, NavalRanges>> = {
-  carrier: { missileRangeKm: 0, airDefenseRangeKm: 50, sensorRangeKm: 400 },
-  battleship: { missileRangeKm: 150, airDefenseRangeKm: 20, sensorRangeKm: 150 },
-  cruiser: { missileRangeKm: 300, airDefenseRangeKm: 150, sensorRangeKm: 350 },
-  destroyer: { missileRangeKm: 250, airDefenseRangeKm: 150, sensorRangeKm: 300 },
-  frigate: { missileRangeKm: 180, airDefenseRangeKm: 50, sensorRangeKm: 200 },
-  littoral: { missileRangeKm: 100, airDefenseRangeKm: 10, sensorRangeKm: 100 },
-  amphibious: { missileRangeKm: 0, airDefenseRangeKm: 30, sensorRangeKm: 150 },
-  mineWarfare: { missileRangeKm: 0, airDefenseRangeKm: 5, sensorRangeKm: 40 },
-  patrol: { missileRangeKm: 40, airDefenseRangeKm: 5, sensorRangeKm: 40 },
-  auxiliary: { missileRangeKm: 0, airDefenseRangeKm: 5, sensorRangeKm: 60 },
-  submarine: { missileRangeKm: 250, airDefenseRangeKm: 0, sensorRangeKm: 100 },
+  carrier: { missileRangeKm: 0, airDefenseRangeKm: 5, sensorRangeKm: 40 },
+  battleship: { missileRangeKm: 15, airDefenseRangeKm: 2, sensorRangeKm: 15 },
+  heavyCruiser: { missileRangeKm: 30, airDefenseRangeKm: 15, sensorRangeKm: 35 },
+  lightCruiser: { missileRangeKm: 20, airDefenseRangeKm: 10, sensorRangeKm: 25 },
+  destroyer: { missileRangeKm: 25, airDefenseRangeKm: 15, sensorRangeKm: 30 },
+  frigate: { missileRangeKm: 18, airDefenseRangeKm: 5, sensorRangeKm: 20 },
+  littoral: { missileRangeKm: 10, airDefenseRangeKm: 1, sensorRangeKm: 10 },
+  amphibious: { missileRangeKm: 0, airDefenseRangeKm: 3, sensorRangeKm: 15 },
+  mineWarfare: { missileRangeKm: 0, airDefenseRangeKm: 0.5, sensorRangeKm: 4 },
+  patrol: { missileRangeKm: 4, airDefenseRangeKm: 0.5, sensorRangeKm: 4 },
+  auxiliary: { missileRangeKm: 0, airDefenseRangeKm: 0.5, sensorRangeKm: 6 },
+  submarine: { missileRangeKm: 25, airDefenseRangeKm: 0, sensorRangeKm: 10 },
 };
 
 export function defaultNaval(t: DivisionType): NavalStatus {

@@ -7,6 +7,7 @@ import {
   effectiveness,
   teamColor,
   IDENTITY_LABEL,
+  HULL_LABEL,
 } from "./types";
 
 ms.setStandard("2525");
@@ -45,6 +46,7 @@ export function renderSymbol(
 
   const key = [
     sidc,
+    d.type, // cruiser classes share a SIDC but not a hull label
     size,
     detail,
     color,
@@ -80,12 +82,16 @@ export function renderSymbol(
     options.infoSize = 40;
   }
 
-  const symbol = new ms.Symbol(sidc, options);
+  // Classes with their own hull letters are drawn from the cruiser symbol,
+  // whose "CC" label is then swapped out (see HULL_LABEL).
+  const hull = HULL_LABEL[d.type];
+  const drawSidc = hull ? `${sidc.slice(0, 4)}CLCC--${sidc.slice(10)}` : sidc;
+  const symbol = new ms.Symbol(drawSidc, options);
 
   const s = symbol.getSize();
   const a = symbol.getAnchor();
   const out: SymbolRender = {
-    svg: symbol.asSVG(),
+    svg: hull ? symbol.asSVG().replace(">CC</text>", `>${hull}</text>`) : symbol.asSVG(),
     width: s.width,
     height: s.height,
     anchor: { x: a.x, y: a.y },

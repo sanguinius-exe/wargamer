@@ -276,7 +276,7 @@ export default function DivisionEditor() {
                 <input
                   type="number"
                   min={0}
-                  step={5}
+                  step={0.5}
                   value={nv[r.key]}
                   onChange={(e) =>
                     update(id, {

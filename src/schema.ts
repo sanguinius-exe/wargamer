@@ -38,17 +38,24 @@ export function normalizeGame(obj: unknown): GameFile {
   if (!("basemap" in raw)) raw.basemap = null;
 
   // Backfill any fields added after a scenario was first saved.
-  raw.divisions = (raw.divisions as Division[]).map((d) => ({
-    ...d,
-    higherFormation: d.higherFormation ?? "",
-    isHQ: d.isHQ ?? false,
-    isTaskForce: d.isTaskForce ?? false,
-    reinforced: d.reinforced ?? null,
-    status: { ...defaultStatus(), ...d.status },
-    naval: isNaval(d.type)
-      ? { ...defaultNaval(d.type), ...d.naval }
-      : (d.naval ?? null),
-  }));
+  raw.divisions = (raw.divisions as Division[]).map((saved) => {
+    // v0.2.0 had a single "cruiser" class; its defaults match the heavy one.
+    const d =
+      (saved.type as string) === "cruiser"
+        ? { ...saved, type: "heavyCruiser" as const }
+        : saved;
+    return {
+      ...d,
+      higherFormation: d.higherFormation ?? "",
+      isHQ: d.isHQ ?? false,
+      isTaskForce: d.isTaskForce ?? false,
+      reinforced: d.reinforced ?? null,
+      status: { ...defaultStatus(), ...d.status },
+      naval: isNaval(d.type)
+        ? { ...defaultNaval(d.type), ...d.naval }
+        : (d.naval ?? null),
+    };
+  });
 
   return raw as unknown as GameFile;
 }
