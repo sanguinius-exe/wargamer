@@ -3,6 +3,7 @@ import MapView from "./map/MapView";
 import Topbar from "./components/Topbar";
 import Sidebar from "./components/Sidebar";
 import DivisionEditor from "./components/DivisionEditor";
+import RulerTool from "./components/RulerTool";
 import { useGameStore } from "./store";
 import { useSession } from "./session";
 
@@ -65,6 +66,7 @@ export default function App() {
         <Sidebar />
         <div className="wg-map-wrap">
           <MapView />
+          <RulerTool />
           {selectingTheatre && (
             <div className="wg-hint">
               Click two corners on the map to set the theatre of operations · Esc to cancel

@@ -16,6 +16,7 @@ import {
   RangeKind,
 } from "../types";
 import { renderSymbol } from "../symbols";
+import { haversineM, fmtDistance } from "../geo";
 import { IMAGERY_URL, IMAGERY_ATTRIB, REFERENCE_ATTRIB } from "../tiles/bake";
 import { activeTileCount } from "../tiles/tileStore";
 
@@ -265,6 +266,11 @@ export default function MapView() {
   const selectingTheatre = useGameStore((s) => s.selectingTheatre);
   const layerVisible = useGameStore((s) => s.layerVisible);
   const rangeVisible = useGameStore((s) => s.rangeVisible);
+  const rulerActive = useGameStore((s) => s.rulerActive);
+  const rulerPoints = useGameStore((s) => s.rulerPoints);
+  const rulerDone = useGameStore((s) => s.rulerDone);
+  const rulerCursor = useGameStore((s) => s.rulerCursor);
+  const rulerLabelsRef = useRef<maplibregl.Marker[]>([]);
   const basemapKey = useGameStore((s) => s.game.basemap?.bakedAt ?? "online");
   const tileEpoch = useGameStore((s) => s.tileEpoch);
 
@@ -334,11 +340,34 @@ export default function MapView() {
 
     map.on("click", (e) => {
       const s = useGameStore.getState();
+      if (s.rulerActive) {
+        // The two clicks of a finishing double-click land on the same spot;
+        // don't turn them into a zero-length leg.
+        const last = s.rulerDone ? undefined : s.rulerPoints[s.rulerPoints.length - 1];
+        if (last) {
+          const p = map.project({ lng: last[0], lat: last[1] });
+          if (Math.hypot(p.x - e.point.x, p.y - e.point.y) < 5) return;
+        }
+        s.rulerAdd([e.lngLat.lng, e.lngLat.lat]);
+        return;
+      }
       if (s.selectingTheatre) s.theatreClick([e.lngLat.lng, e.lngLat.lat]);
       else {
         s.selectDivision(null);
         if (s.selectedIds.length) s.setSelectedIds([]);
       }
+    });
+
+    map.on("dblclick", (e) => {
+      const s = useGameStore.getState();
+      if (!s.rulerActive) return;
+      e.preventDefault();
+      s.rulerFinish();
+    });
+    map.on("mousemove", (e) => {
+      const s = useGameStore.getState();
+      if (s.rulerActive && s.rulerPoints.length && !s.rulerDone)
+        s.setRulerCursor([e.lngLat.lng, e.lngLat.lat]);
     });
 
     // --- right-click-drag box select ------------------------------------
@@ -405,8 +434,19 @@ export default function MapView() {
     };
     const onContextMenu = (e: MouseEvent) => e.preventDefault();
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
       const s = useGameStore.getState();
+      if (s.rulerActive) {
+        const t = e.target as HTMLElement | null;
+        if (t?.closest("input, textarea, select")) return;
+        if (e.key === "Escape") s.setRulerActive(false);
+        else if (e.key === "Enter") s.rulerFinish();
+        else if (e.key === "Backspace" || e.key === "Delete") {
+          e.preventDefault();
+          s.rulerUndo();
+        }
+        return;
+      }
+      if (e.key !== "Escape") return;
       s.selectDivision(null);
       if (s.selectedIds.length) s.setSelectedIds([]);
     };
@@ -449,6 +489,7 @@ export default function MapView() {
         syncTheatre();
         syncMarkers();
         syncRanges();
+        syncRuler();
       });
     }
     styleKeyRef.current = key;
@@ -567,6 +608,43 @@ export default function MapView() {
           "line-width": 2,
           "line-dasharray": [2, 2],
           "line-opacity": 0.9,
+        },
+      });
+    }
+    if (!map.getSource("wg-ruler")) {
+      map.addSource("wg-ruler", { type: "geojson", data: EMPTY_FC });
+      map.addLayer({
+        id: "wg-ruler-casing",
+        type: "line",
+        source: "wg-ruler",
+        filter: ["==", ["geometry-type"], "LineString"],
+        paint: { "line-color": "#000000", "line-width": 5, "line-opacity": 0.55 },
+      });
+      // Dash patterns can't vary per feature, so the live leg gets its own layer.
+      map.addLayer({
+        id: "wg-ruler-line",
+        type: "line",
+        source: "wg-ruler",
+        filter: ["==", ["get", "live"], false],
+        paint: { "line-color": "#ffffff", "line-width": 2 },
+      });
+      map.addLayer({
+        id: "wg-ruler-live",
+        type: "line",
+        source: "wg-ruler",
+        filter: ["==", ["get", "live"], true],
+        paint: { "line-color": "#ffffff", "line-width": 2, "line-dasharray": [2, 1.5] },
+      });
+      map.addLayer({
+        id: "wg-ruler-pts",
+        type: "circle",
+        source: "wg-ruler",
+        filter: ["==", ["geometry-type"], "Point"],
+        paint: {
+          "circle-radius": 4,
+          "circle-color": "#ffffff",
+          "circle-stroke-color": "#000000",
+          "circle-stroke-width": 1.5,
         },
       });
     }
@@ -690,6 +768,66 @@ export default function MapView() {
     myTeamId,
     proposals,
   ]);
+
+  // --- GM ruler ---------------------------------------------------------
+  function syncRuler() {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    ensureOverlay(map);
+    const { rulerPoints: pts, rulerCursor: cur, rulerDone: done } = useGameStore.getState();
+    const features: FC["features"] = pts.map((p) => ({
+      type: "Feature",
+      properties: {},
+      geometry: { type: "Point", coordinates: p },
+    }));
+    if (pts.length > 1)
+      features.push({
+        type: "Feature",
+        properties: { live: false },
+        geometry: { type: "LineString", coordinates: pts },
+      });
+    if (!done && cur && pts.length)
+      features.push({
+        type: "Feature",
+        properties: { live: true },
+        geometry: { type: "LineString", coordinates: [pts[pts.length - 1], cur] },
+      });
+    (map.getSource("wg-ruler") as maplibregl.GeoJSONSource | undefined)?.setData({
+      type: "FeatureCollection",
+      features,
+    });
+
+    // Running total at every vertex after the first, and at the live end.
+    for (const m of rulerLabelsRef.current) m.remove();
+    rulerLabelsRef.current = [];
+    const ends = !done && cur && pts.length ? [...pts, cur] : pts;
+    let total = 0;
+    for (let i = 1; i < ends.length; i++) {
+      const a = { lng: ends[i - 1][0], lat: ends[i - 1][1] };
+      const b = { lng: ends[i][0], lat: ends[i][1] };
+      total += haversineM(a, b);
+      const el = document.createElement("div");
+      el.className = "wg-ruler-label";
+      el.textContent = fmtDistance(total);
+      rulerLabelsRef.current.push(
+        new maplibregl.Marker({ element: el, anchor: "bottom-left", offset: [8, -6] })
+          .setLngLat(ends[i])
+          .addTo(map),
+      );
+    }
+  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(syncRuler, [ready, rulerPoints, rulerDone, rulerCursor]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    // Double-click finishes a measurement instead of zooming; markers stop
+    // catching clicks so points can be dropped right on top of a unit.
+    if (rulerActive) map.doubleClickZoom.disable();
+    else map.doubleClickZoom.enable();
+    containerRef.current?.classList.toggle("wg-ruler-on", rulerActive);
+  }, [rulerActive]);
 
   function syncTheatre() {
     const map = mapRef.current;

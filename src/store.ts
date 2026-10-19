@@ -80,6 +80,12 @@ interface State {
   rangeVisible: Record<RangeKind, boolean>;
   selectingTheatre: boolean;
   theatreDraft: LngLat | null;
+  /** GM ruler: measuring mode, its vertices, and the live cursor end. */
+  rulerActive: boolean;
+  rulerPoints: LngLat[];
+  /** True once a measurement is finished (double-click / Enter). */
+  rulerDone: boolean;
+  rulerCursor: LngLat | null;
   toast: Toast | null;
   bake: BakeProgress | null;
   /** Bumped whenever baked tiles change, so the map can refresh its sources. */
@@ -94,6 +100,12 @@ interface State {
   cancelTheatreSelect: () => void;
   clearTheatre: () => void;
   theatreClick: (p: LngLat) => void;
+
+  setRulerActive: (on: boolean) => void;
+  rulerAdd: (p: LngLat) => void;
+  rulerUndo: () => void;
+  rulerFinish: () => void;
+  setRulerCursor: (p: LngLat | null) => void;
 
   setLayerVisible: (layer: "imagery" | "reference", on: boolean) => void;
   setRangeVisible: (kind: RangeKind, on: boolean) => void;
@@ -163,6 +175,13 @@ function boundsFromCorners(a: LngLat, b: LngLat): GameFile["theatre"] {
   };
 }
 
+const RULER_OFF = {
+  rulerActive: false,
+  rulerPoints: [] as LngLat[],
+  rulerDone: false,
+  rulerCursor: null as LngLat | null,
+};
+
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 let bakeAbort: AbortController | null = null;
 
@@ -180,6 +199,7 @@ export const useGameStore = create<State>((set, get) => ({
   rangeVisible: { missile: true, airDefense: true, sensor: true },
   selectingTheatre: false,
   theatreDraft: null,
+  ...RULER_OFF,
   toast: null,
   bake: null,
   tileEpoch: 0,
@@ -249,7 +269,25 @@ export const useGameStore = create<State>((set, get) => ({
     set((s) => ({ game: { ...s.game, meta: { ...s.game.meta, ...patch } } })),
 
   startTheatreSelect: () =>
-    set({ selectingTheatre: true, theatreDraft: null, selectedDivisionId: null }),
+    set({
+      selectingTheatre: true,
+      theatreDraft: null,
+      selectedDivisionId: null,
+      ...RULER_OFF,
+    }),
+
+  setRulerActive: (on) =>
+    set(on ? { ...RULER_OFF, rulerActive: true, selectingTheatre: false } : RULER_OFF),
+  rulerAdd: (p) =>
+    set((s) =>
+      s.rulerDone
+        ? { rulerPoints: [p], rulerDone: false }
+        : { rulerPoints: [...s.rulerPoints, p] },
+    ),
+  rulerUndo: () =>
+    set((s) => ({ rulerPoints: s.rulerPoints.slice(0, -1), rulerDone: false })),
+  rulerFinish: () => set((s) => ({ rulerDone: s.rulerPoints.length > 0, rulerCursor: null })),
+  setRulerCursor: (p) => set({ rulerCursor: p }),
 
   cancelTheatreSelect: () => set({ selectingTheatre: false, theatreDraft: null }),
 
